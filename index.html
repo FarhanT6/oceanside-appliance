@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Oceanside Appliance — Sales & Repairs Since 1996</title>
+  <meta name="description" content="Oceanside Appliance sells, fixes, and buys all types of appliances. Nearly 30 years of experience serving all of San Diego. 7 days a week including evenings and holidays." />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'><circle cx='160' cy='160' r='160' fill='%23eaf4fd'/><path d='M0 237 C52 214,82 252,112 234 C142 216,172 246,202 234 C226 222,252 234,320 228 L320 320 L0 320Z' fill='%231a7fc1' opacity='0.35'/><rect x='38' y='102' width='36' height='48' rx='4' fill='none' stroke='%231a2e44' stroke-width='7'/><circle cx='56' cy='132' r='12' fill='none' stroke='%231a7fc1' stroke-width='6'/><rect x='77' y='102' width='36' height='48' rx='4' fill='none' stroke='%231a2e44' stroke-width='7'/><circle cx='95' cy='132' r='12' fill='none' stroke='%231a7fc1' stroke-width='6'/><rect x='147' y='74' width='48' height='84' rx='5' fill='none' stroke='%231a2e44' stroke-width='8'/><line x1='171' y1='74' x2='171' y2='158' stroke='%231a2e44' stroke-width='4' opacity='0.4'/><circle cx='160' cy='160' r='155' fill='none' stroke='%231a2e44' stroke-width='9'/></svg>" /><text y='.9em' font-size='90'>🌊</text></svg>" />
+</head>
+<body>
+
+<!-- ======== NAVBAR ======== -->
+<nav class="navbar" id="navbar">
+  <a href="#" class="nav-logo">
+    <div class="nav-logo-icon">🌊</div>
+    <span class="nav-logo-text">Oceanside <span>Appliance</span></span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#products">Shop</a></li>
+    <li><a href="#repair">Repair</a></li>
+    <li><a href="#contact">Contact</a></li>
+    <li><a href="#" class="nav-cta" id="cartNavBtn">🛒 Cart <span class="cart-count" id="cartCountNav">0</span></a></li>
+  </ul>
+  <div class="hamburger" id="hamburger">
+    <span></span><span></span><span></span>
+  </div>
+</nav>
+
+<!-- ======== HERO ======== -->
+<section class="hero" id="home">
+  <div class="hero-bg">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="wave">
+      <svg viewBox="0 0 1440 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M0,192L60,181.3C120,171,240,149,360,160C480,171,600,213,720,213.3C840,213,960,171,1080,154.7C1200,139,1320,149,1380,154.7L1440,160L1440,320L1380,320C1320,320,1200,320,1080,320C960,320,840,320,720,320C600,320,480,320,360,320C240,320,120,320,60,320L0,320Z" fill="#1a7fc1"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="hero-content">
+    <div class="hero-text">
+      <div class="hero-badge">🏆 Serving San Diego Since 1996</div>
+      <h1 class="hero-title">
+        We Sell, Fix &amp;
+        <strong>Buy Appliances</strong>
+      </h1>
+      <p class="hero-subtitle">Nearly 30 years of experience serving all of San Diego. We specialize in speedy service, available 7 days a week — including evenings, weekends, and holidays. Same-day service and delivery available.</p>
+      <div class="hero-actions">
+        <a href="#products" class="btn-primary">🛒 Shop Appliances</a>
+        <a href="#repair" class="btn-outline">🔧 Request Repair</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat">
+          <div class="stat-number">29</div>
+          <div class="stat-label">Years in Business</div>
+        </div>
+        <div class="stat">
+          <div class="stat-number">7</div>
+          <div class="stat-label">Days a Week</div>
+        </div>
+        <div class="stat">
+          <div class="stat-number">SD</div>
+          <div class="stat-label">All of San Diego</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-visual">
+      <div class="appliance-card-hero" onclick="scrollToProducts('refrigerator')">
+        <span class="icon">🧊</span>
+        <div class="name">Refrigerators</div>
+        <div class="price">from $599</div>
+      </div>
+      <div class="appliance-card-hero" onclick="scrollToProducts('washer')">
+        <span class="icon">👕</span>
+        <div class="name">Washers</div>
+        <div class="price">from $449</div>
+      </div>
+      <div class="appliance-card-hero" onclick="scrollToProducts('dishwasher')">
+        <span class="icon">🍽️</span>
+        <div class="name">Dishwashers</div>
+        <div class="price">from $379</div>
+      </div>
+      <div class="appliance-card-hero" onclick="scrollToProducts('oven')">
+        <span class="icon">🔥</span>
+        <div class="name">Ovens &amp; Ranges</div>
+        <div class="price">from $529</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ======== PRODUCTS SECTION ======== -->
+<section class="section" id="products">
+  <div class="section-inner">
+    <div class="section-header reveal">
+      <div class="section-tag">Our Catalog</div>
+      <h2 class="section-title">Shop <span>All Appliances</span></h2>
+      <p class="section-sub">Browse all major brands. Filter by type, brand, or price to find exactly what you need.</p>
+    </div>
+
+    <!-- Dropdown Filters -->
+    <div class="filter-dropdowns reveal">
+      <div class="filter-group">
+        <label>Appliance Type</label>
+        <select class="filter-select" id="filterType">
+          <option value="">All Types</option>
+          <option value="refrigerator">🧊 Refrigerators</option>
+          <option value="washer">👕 Washers</option>
+          <option value="dryer">🌀 Dryers</option>
+          <option value="dishwasher">🍽️ Dishwashers</option>
+          <option value="oven">🔥 Ovens &amp; Ranges</option>
+          <option value="microwave">📡 Microwaves</option>
+          <option value="freezer">❄️ Freezers</option>
+          <option value="vacuum">🧹 Vacuums</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Brand</label>
+        <select class="filter-select" id="filterBrand">
+          <option value="">All Brands</option>
+          <option value="Samsung">Samsung</option>
+          <option value="LG">LG</option>
+          <option value="Whirlpool">Whirlpool</option>
+          <option value="GE">GE</option>
+          <option value="Maytag">Maytag</option>
+          <option value="Bosch">Bosch</option>
+          <option value="KitchenAid">KitchenAid</option>
+          <option value="Frigidaire">Frigidaire</option>
+          <option value="Electrolux">Electrolux</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Price Range</label>
+        <select class="filter-select" id="filterPrice">
+          <option value="">Any Price</option>
+          <option value="0-300">Under $300</option>
+          <option value="300-700">$300 – $700</option>
+          <option value="700-1200">$700 – $1,200</option>
+          <option value="1200-99999">Over $1,200</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Condition</label>
+        <select class="filter-select" id="filterCondition">
+          <option value="">All Conditions</option>
+          <option value="new">🆕 New</option>
+          <option value="used">🔧 Used</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Sort By</label>
+        <select class="filter-select" id="filterSort">
+          <option value="default">Default</option>
+          <option value="price-asc">Price: Low to High</option>
+          <option value="price-desc">Price: High to Low</option>
+          <option value="name-asc">Name: A–Z</option>
+        </select>
+      </div>
+      <button class="filter-reset" id="filterResetBtn">✕ Clear</button>
+    </div>
+
+    <div class="results-count" id="resultsCount"></div>
+    <div class="products-grid" id="productsGrid"></div>
+  </div>
+</section>
+
+<!-- ======== REPAIR SECTION ======== -->
+<section class="section" id="repair">
+  <div class="section-inner">
+    <div class="section-header reveal">
+      <div class="section-tag">Repair Services</div>
+      <h2 class="section-title">Fast, Reliable <span>Appliance Repair</span></h2>
+      <p class="section-sub">Available 7 days a week — including evenings, weekends, and holidays. We service all of San Diego with a focus on North County.</p>
+    </div>
+
+    <div class="repair-grid">
+
+      <div class="repair-form-card reveal">
+        <div id="repairFormContent">
+          <div class="form-title">Request a Repair</div>
+          <p class="form-subtitle">Fill out the form below and we'll be in touch shortly to schedule.</p>
+
+          <form id="repairForm">
+            <div class="form-row">
+              <div class="form-group">
+                <label>First Name *</label>
+                <input type="text" name="firstName" placeholder="John" required />
+              </div>
+              <div class="form-group">
+                <label>Last Name *</label>
+                <input type="text" name="lastName" placeholder="Smith" required />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Phone Number *</label>
+                <input type="tel" name="phone" placeholder="(760) 555-0100" required />
+              </div>
+              <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" name="email" placeholder="john@email.com" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Street Address *</label>
+              <input type="text" name="address" placeholder="1234 Ocean Blvd, Oceanside, CA" required />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Appliance Type *</label>
+                <select name="applianceType" required>
+                  <option value="">Select appliance…</option>
+                  <option value="refrigerator">Refrigerator</option>
+                  <option value="washer">Washer</option>
+                  <option value="dryer">Dryer</option>
+                  <option value="dishwasher">Dishwasher</option>
+                  <option value="oven">Oven / Range</option>
+                  <option value="microwave">Microwave</option>
+                  <option value="freezer">Freezer</option>
+                  <option value="vacuum">Vacuum</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Brand</label>
+                <select name="brand">
+                  <option value="">Select brand…</option>
+                  <option>Samsung</option>
+                  <option>LG</option>
+                  <option>Whirlpool</option>
+                  <option>GE</option>
+                  <option>Maytag</option>
+                  <option>Bosch</option>
+                  <option>KitchenAid</option>
+                  <option>Frigidaire</option>
+                  <option>Electrolux</option>
+                  <option>Miele</option>
+                  <option>Other</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Describe the Problem *</label>
+              <textarea name="description" placeholder="Describe what's happening with your appliance — the more detail, the better we can prepare…" required></textarea>
+            </div>
+            <button type="submit" class="btn-submit" id="repairSubmitBtn">📩 Submit Repair Request</button>
+          </form>
+        </div>
+
+        <div class="form-success" id="repairSuccess">
+          <div class="success-icon">✅</div>
+          <div class="success-title">Request Received!</div>
+          <p class="success-msg">Thank you! We'll reach out shortly to schedule your repair.</p>
+          <br/>
+          <button class="btn-primary" onclick="resetRepairForm()">Submit Another Request</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== FOOTER ======== -->
+<footer class="footer" id="contact">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a href="#" class="nav-logo">
+        <div class="nav-logo-icon">🌊</div>
+        <span class="nav-logo-text">Oceanside <span>Appliance</span></span>
+      </a>
+      <p class="footer-desc">Locally owned and operated since 1996. Nearly 30 years serving all of San Diego with appliance sales and repairs. Available 7 days a week — including evenings, weekends, and holidays.</p>
+    </div>
+    <div class="footer-contact">
+      <div class="footer-col-title">Contact Us</div>
+      <p>📍 1016 S Tremont St, Oceanside, CA 92054</p>
+      <p>📞 <a href="tel:7607548200" style="color:rgba(255,255,255,.5);text-decoration:none">(760) 754-8200</a></p>
+      <p>✉️ <a href="mailto:oceansideappliance96@gmail.com" style="color:rgba(255,255,255,.5);text-decoration:none">oceansideappliance96@gmail.com</a></p>
+      <p>⏰ 7 Days a Week · Evenings &amp; Holidays</p>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2025 Oceanside Appliance · Est. 1996 · All Rights Reserved</span>
+  </div>
+</footer>
+
+<!-- ======== CART SIDEBAR ======== -->
+<div class="cart-overlay" id="cartOverlay" onclick="toggleCart()"></div>
+<div class="cart-sidebar" id="cartSidebar">
+  <div class="cart-header">
+    <div class="cart-title">🛒 Your Cart</div>
+    <button class="cart-close" onclick="toggleCart()">✕</button>
+  </div>
+  <div class="cart-items" id="cartItems">
+    <p style="color:var(--gray-mid);text-align:center;padding:3rem 1rem;font-size:0.9rem;">Your cart is empty.<br/><a href="#products" style="color:var(--ocean)" onclick="toggleCart()">Browse products →</a></p>
+  </div>
+  <div class="cart-footer">
+    <div class="cart-total">
+      <span class="cart-total-label">Total</span>
+      <span class="cart-total-amount" id="cartTotal">$0.00</span>
+    </div>
+    <button class="btn-checkout" onclick="openCheckout()">Proceed to Checkout →</button>
+  </div>
+</div>
+
+<!-- ======== PRODUCT MODAL ======== -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="productModal">
+    <div class="modal-header">
+      <div></div>
+      <button class="modal-close" onclick="closeModalDirect()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+
+<!-- ======== CHECKOUT MODAL ======== -->
+<div class="checkout-overlay" id="checkoutOverlay">
+  <div class="checkout-modal" id="checkoutModal">
+
+    <!-- Header -->
+    <div class="checkout-header">
+      <div class="checkout-header-left">
+        <button class="checkout-back" id="checkoutBackBtn" onclick="closeCheckout()">← Back to Cart</button>
+        <div class="checkout-step-label" id="checkoutStepLabel">Your Information</div>
+      </div>
+      <button class="checkout-close-x" onclick="closeCheckout()">✕</button>
+    </div>
+
+    <!-- Steps bar -->
+    <div class="checkout-steps">
+      <div class="checkout-step active" id="step-dot-1">
+        <div class="step-dot">1</div>
+        <div class="step-name">Details</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="checkout-step" id="step-dot-2">
+        <div class="step-dot">2</div>
+        <div class="step-name">Review</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="checkout-step" id="step-dot-3">
+        <div class="step-dot">3</div>
+        <div class="step-name">Confirm</div>
+      </div>
+    </div>
+
+    <!-- Step 1: Customer Details -->
+    <div class="checkout-body" id="checkoutStep1">
+      <div class="checkout-two-col">
+        <div class="checkout-form-section">
+          <div class="checkout-section-title">Contact Information</div>
+          <div class="co-form-row">
+            <div class="co-form-group">
+              <label>First Name *</label>
+              <input type="text" id="co-firstName" placeholder="John" />
+            </div>
+            <div class="co-form-group">
+              <label>Last Name *</label>
+              <input type="text" id="co-lastName" placeholder="Smith" />
+            </div>
+          </div>
+          <div class="co-form-row">
+            <div class="co-form-group">
+              <label>Phone Number *</label>
+              <input type="tel" id="co-phone" placeholder="(760) 555-0100" />
+            </div>
+            <div class="co-form-group">
+              <label>Email Address *</label>
+              <input type="email" id="co-email" placeholder="john@email.com" />
+            </div>
+          </div>
+
+          <div class="checkout-section-title" style="margin-top:1.5rem">How would you like to proceed?</div>
+          <div class="delivery-options">
+            <label class="delivery-option">
+              <input type="radio" name="fulfillment" value="pickup" id="opt-pickup" checked />
+              <div class="delivery-option-card">
+                <div class="delivery-option-icon">🏪</div>
+                <div>
+                  <div class="delivery-option-title">Store Pickup</div>
+                  <div class="delivery-option-desc">1016 S Tremont St, Oceanside · By appointment</div>
+                </div>
+              </div>
+            </label>
+<label class="delivery-option">
+              <input type="radio" name="fulfillment" value="delivery" id="opt-delivery" />
+              <div class="delivery-option-card">
+                <div class="delivery-option-icon">🚚</div>
+                <div>
+                  <div class="delivery-option-title">Delivery &amp; Installation</div>
+                  <div class="delivery-option-desc">By appointment · Contact us for pricing</div>
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <div id="deliveryAddressBlock" class="co-form-group" style="margin-top:1rem;display:none">
+            <label>Delivery Address *</label>
+            <input type="text" id="co-address" placeholder="123 Ocean Blvd, Oceanside, CA 92054" />
+          </div>
+
+          <div class="co-form-group" style="margin-top:1rem">
+            <label>Preferred Date / Availability</label>
+            <input type="text" id="co-date" placeholder="e.g. Weekday mornings, ASAP, Saturday" />
+          </div>
+
+          <div class="co-form-group">
+            <label>Special Notes</label>
+            <textarea id="co-notes" placeholder="Any additional info — gate codes, access instructions, questions…" rows="3"></textarea>
+          </div>
+        </div>
+
+        <!-- Mini order summary sidebar -->
+        <div class="checkout-order-sidebar">
+          <div class="checkout-section-title">Order Summary</div>
+          <div id="checkoutSidebarItems"></div>
+          <div class="checkout-sidebar-total">
+            <span>Subtotal</span>
+            <span id="checkoutSidebarSubtotal">$0</span>
+          </div>
+          <div class="checkout-sidebar-note">
+            💡 This is a request to purchase. We'll reach out to confirm availability and next steps.
+          </div>
+        </div>
+      </div>
+
+      <div class="checkout-footer-bar">
+        <div class="checkout-footer-total">
+          Total: <strong id="checkoutFooterTotal">$0</strong>
+        </div>
+        <button class="btn-checkout-next" onclick="goToStep2()">Review Order →</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Review -->
+    <div class="checkout-body hidden" id="checkoutStep2">
+      <div class="checkout-two-col">
+        <div class="checkout-form-section">
+          <div class="checkout-section-title">Order Items</div>
+          <div id="reviewItems"></div>
+
+          <div class="checkout-section-title" style="margin-top:1.5rem">Your Details</div>
+          <div class="review-details" id="reviewDetails"></div>
+
+          <div class="checkout-section-title" style="margin-top:1.5rem">Fulfillment</div>
+          <div class="review-details" id="reviewFulfillment"></div>
+        </div>
+
+        <div class="checkout-order-sidebar">
+          <div class="checkout-section-title">Price Breakdown</div>
+          <div id="reviewPriceBreakdown"></div>
+          <div class="checkout-sidebar-note" style="margin-top:1rem">
+            🔒 No payment is collected now. We will reach out to confirm your order and arrange payment.
+          </div>
+        </div>
+      </div>
+
+      <div class="checkout-footer-bar">
+        <button class="btn-checkout-back" onclick="goToStep1()">← Edit Details</button>
+        <button class="btn-checkout-next" onclick="submitOrder()">
+          <span id="submitBtnText">✅ Submit Order Request</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 3: Confirmation -->
+    <div class="checkout-body hidden" id="checkoutStep3">
+      <div class="checkout-confirmation">
+        <div class="confirmation-badge">✅</div>
+        <h2 class="confirmation-title">Order Request Received!</h2>
+        <p class="confirmation-subtitle">Thank you! We'll reach out to confirm your appointment and next steps.</p>
+        <div class="confirmation-details" id="confirmationDetails"></div>
+        <div class="confirmation-contact">
+          <div>📞 <a href="tel:7607548200">(760) 754-8200</a></div>
+          <div>✉️ <a href="mailto:oceansideappliance96@gmail.com">oceansideappliance96@gmail.com</a></div>
+        </div>
+        <button class="btn-primary" onclick="closeCheckout()" style="margin-top:2rem">Back to Shopping</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======== TOAST ======== -->
+<div class="toast" id="toast"></div>
+
+
+<script src="js/logo.js"></script>
+<script src="js/products.js"></script>
+<script src="js/cart.js"></script>
+<script src="js/checkout.js"></script>
+<script src="js/main.js"></script>
+
+<!-- ── VIEW IN PERSON MODAL ── -->
+<div id="viewInPersonOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)closeViewModal()">
+  <div style="background:#fff;border-radius:16px;padding:2.5rem;width:480px;max-width:95vw;box-shadow:0 24px 64px rgba(0,0,0,.25);font-family:var(--font-body)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem">
+      <div>
+        <div style="font-size:1.25rem;font-weight:700;color:var(--navy)">Schedule a Viewing</div>
+        <div style="font-size:.85rem;color:var(--gray-mid);margin-top:.25rem">We'll reach out to arrange a time that works.</div>
+      </div>
+      <button onclick="closeViewModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--gray-mid);line-height:1;padding:.25rem">✕</button>
+    </div>
+    <div id="viewInPersonAppliance" style="background:var(--gray-bg);border-radius:10px;padding:.875rem 1rem;margin-bottom:1.5rem;font-size:.88rem;color:var(--navy);font-weight:600"></div>
+    <div style="display:grid;gap:1rem">
+      <div>
+        <label style="display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);margin-bottom:.35rem">Your Name *</label>
+        <input id="vip-name" type="text" placeholder="John Smith" style="width:100%;padding:.7rem 1rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.9rem;box-sizing:border-box;outline:none" onfocus="this.style.borderColor='var(--ocean)'" onblur="this.style.borderColor='var(--gray-light)'" />
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+        <div>
+          <label style="display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);margin-bottom:.35rem">Phone *</label>
+          <input id="vip-phone" type="tel" placeholder="(760) 555-1234" style="width:100%;padding:.7rem 1rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.9rem;box-sizing:border-box;outline:none" onfocus="this.style.borderColor='var(--ocean)'" onblur="this.style.borderColor='var(--gray-light)'" />
+        </div>
+        <div>
+          <label style="display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);margin-bottom:.35rem">Email</label>
+          <input id="vip-email" type="email" placeholder="john@email.com" style="width:100%;padding:.7rem 1rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.9rem;box-sizing:border-box;outline:none" onfocus="this.style.borderColor='var(--ocean)'" onblur="this.style.borderColor='var(--gray-light)'" />
+        </div>
+      </div>
+      <div>
+        <label style="display:block;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);margin-bottom:.35rem">Best time to reach you</label>
+        <input id="vip-time" type="text" placeholder="e.g. Weekday mornings, anytime after 3pm" style="width:100%;padding:.7rem 1rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.9rem;box-sizing:border-box;outline:none" onfocus="this.style.borderColor='var(--ocean)'" onblur="this.style.borderColor='var(--gray-light)'" />
+      </div>
+    </div>
+    <div id="vip-error" style="display:none;color:#c0392b;font-size:.8rem;margin-top:.75rem"></div>
+    <button onclick="submitViewRequest()" style="width:100%;margin-top:1.5rem;padding:.9rem;background:var(--ocean);color:#fff;border:none;border-radius:10px;font-family:var(--font-body);font-size:.95rem;font-weight:700;cursor:pointer;transition:background .2s" onmouseover="this.style.background='var(--navy)'" onmouseout="this.style.background='var(--ocean)'">
+      Request a Viewing →
+    </button>
+    <p style="text-align:center;font-size:.75rem;color:var(--gray-mid);margin:.75rem 0 0">We'll contact you to confirm a time. No commitment required.</p>
+  </div>
+</div>
+<!-- ── VIEW IN PERSON SUCCESS ── -->
+<div id="viewInPersonSuccess" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)closeViewSuccess()">
+  <div style="background:#fff;border-radius:16px;padding:3rem 2.5rem;width:420px;max-width:95vw;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.25)">
+    <div style="font-size:3rem;margin-bottom:1rem">👍</div>
+    <div style="font-size:1.3rem;font-weight:700;color:var(--navy);margin-bottom:.5rem">Request Sent!</div>
+    <p style="color:var(--gray-mid);font-size:.9rem;line-height:1.6">We'll reach out to schedule your viewing. Thanks for your interest!</p>
+    <button onclick="closeViewSuccess()" style="margin-top:1.5rem;padding:.75rem 2rem;background:var(--ocean);color:#fff;border:none;border-radius:8px;font-family:var(--font-body);font-weight:600;cursor:pointer">Done</button>
+  </div>
+</div>
+</body>
+</html>

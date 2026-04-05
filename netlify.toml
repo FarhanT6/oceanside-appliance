@@ -1,0 +1,37 @@
+# ============================================
+#   OCEANSIDE APPLIANCE — NETLIFY CONFIG
+#   Protects the staff portal at the server level
+# ============================================
+
+[build]
+  publish = "."
+
+# Block the old /admin/ path entirely — redirect to 404
+[[redirects]]
+  from = "/admin/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+# Block any path with "admin" in it
+[[redirects]]
+  from = "/admin"
+  to = "/404.html"
+  status = 404
+  force = true
+
+# Security headers for entire site
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Extra security headers just for staff portal
+[[headers]]
+  for = "/staff-9k2x/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "no-store, no-cache, must-revalidate"

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Panel — Oceanside Appliance</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+  <link rel="stylesheet" href="admin.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'><circle cx='160' cy='160' r='160' fill='%23eaf4fd'/><path d='M0 237 C52 214,82 252,112 234 C142 216,172 246,202 234 C226 222,252 234,320 228 L320 320 L0 320Z' fill='%231a7fc1' opacity='0.35'/><rect x='38' y='102' width='36' height='48' rx='4' fill='none' stroke='%231a2e44' stroke-width='7'/><circle cx='56' cy='132' r='12' fill='none' stroke='%231a7fc1' stroke-width='6'/><rect x='77' y='102' width='36' height='48' rx='4' fill='none' stroke='%231a2e44' stroke-width='7'/><circle cx='95' cy='132' r='12' fill='none' stroke='%231a7fc1' stroke-width='6'/><rect x='147' y='74' width='48' height='84' rx='5' fill='none' stroke='%231a2e44' stroke-width='8'/><line x1='171' y1='74' x2='171' y2='158' stroke='%231a2e44' stroke-width='4' opacity='0.4'/><circle cx='160' cy='160' r='155' fill='none' stroke='%231a2e44' stroke-width='9'/></svg>" /><text y='.9em' font-size='90'>⚙️</text></svg>" />
+</head>
+<body class="admin-body">
+
+
+<!-- ======== ADMIN PASSWORD PROTECTION ======== -->
+<div id="adminLoginScreen" style="
+  position:fixed;inset:0;background:linear-gradient(160deg,#0b2545,#1a6fa8);
+  display:flex;align-items:center;justify-content:center;z-index:99999;
+  font-family:'Jost',sans-serif;">
+  <div style="background:white;border-radius:20px;padding:3rem;width:100%;max-width:420px;margin:1rem;box-shadow:0 32px 80px rgba(0,0,0,0.3);text-align:center;">
+    <div style="font-size:3rem;margin-bottom:1rem;">🌊</div>
+    <div style="font-family:Georgia,serif;font-size:1.8rem;font-weight:700;color:#1a2e44;margin-bottom:0.4rem;">Oceanside Appliance</div>
+    <div style="font-size:0.8rem;color:#8fa3b8;letter-spacing:.12em;text-transform:uppercase;margin-bottom:2rem;">Staff Portal</div>
+    <div style="margin-bottom:1.25rem;text-align:left;">
+      <label style="font-size:0.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#3d5166;display:block;margin-bottom:.5rem;">Password</label>
+      <input type="password" id="adminPasswordInput"
+        placeholder="Enter admin password"
+        style="width:100%;padding:.75rem 1rem;border:2px solid #e4edf5;border-radius:8px;font-size:.95rem;font-family:inherit;outline:none;box-sizing:border-box;transition:.2s;"
+        onkeydown="if(event.key==='Enter')checkAdminPassword()"
+        onfocus="this.style.borderColor='#1a7fc1'"
+        onblur="this.style.borderColor='#e4edf5'"
+      />
+    </div>
+    <div id="adminLoginError" style="color:#c0392b;font-size:.82rem;margin-bottom:.75rem;display:none;">Incorrect password. Please try again.</div>
+    <button onclick="checkAdminPassword()" style="
+      width:100%;background:linear-gradient(135deg,#1a7fc1,#5bb8f5);color:white;
+      border:none;padding:1rem;border-radius:10px;font-size:1rem;font-weight:600;
+      cursor:pointer;font-family:inherit;letter-spacing:.04em;">
+      Sign In →
+    </button>
+    <div style="margin-top:1.5rem;font-size:.75rem;color:#8fa3b8;">
+      Oceanside Appliance · Est. 1996
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── CHANGE THIS PASSWORD TO WHATEVER YOU WANT ──
+  const ADMIN_PASSWORD_HASH = '5052c6cffa42bca5d2f1ddba0d5e933ed405dda58b96eb03c258ae0d5ddfd435'; // SHA-256 — change by updating the hash
+
+  async function checkAdminPassword() {
+    const input = document.getElementById('adminPasswordInput').value;
+    const error = document.getElementById('adminLoginError');
+    // Compare against SHA-256 hash so password never lives in plain text
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+    const hash = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    if (hash === ADMIN_PASSWORD_HASH) {
+      // Store session so they don't have to log in every time
+      sessionStorage.setItem('oa_admin_auth', 'true');
+      document.getElementById('adminLoginScreen').style.display = 'none';
+    } else {
+      error.style.display = 'block';
+      document.getElementById('adminPasswordInput').value = '';
+      document.getElementById('adminPasswordInput').style.borderColor = '#c0392b';
+      setTimeout(() => {
+        document.getElementById('adminPasswordInput').style.borderColor = '#e4edf5';
+      }, 2000);
+    }
+  }
+
+  // Check if already authenticated this session
+  if (sessionStorage.getItem('oa_admin_auth') === 'true') {
+    document.getElementById('adminLoginScreen').style.display = 'none';
+  }
+</script>
+
+<div class="admin-layout">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="admin-sidebar">
+    <div class="sidebar-logo">
+      <div class="nav-logo-icon">🌊</div>
+      <div>
+        <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:600;color:var(--white)">Oceanside</div>
+        <div style="font-size:0.7rem;color:rgba(255,255,255,0.4);letter-spacing:.1em;text-transform:uppercase">Admin Panel</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a href="#" class="sidebar-link active" data-tab="dashboard">
+        <span>📊</span> Dashboard
+      </a>
+      <a href="#" class="sidebar-link" data-tab="sales">
+        <span>💰</span> Sales
+      </a>
+      <a href="#" class="sidebar-link" data-tab="repairs">
+        <span>🔧</span> Repair Requests
+      </a>
+      <a href="#" class="sidebar-link" data-tab="inventory">
+        <span>📦</span> Inventory
+      </a>
+      <div class="sidebar-divider"></div>
+      <a href="#" class="sidebar-link" data-tab="ledger" onclick="showTab('ledger');return false;">
+        <span class="sidebar-icon">📒</span> Ledger
+      </a>
+      <a href="../index.html" class="sidebar-link">
+        <span>🏠</span> View Website
+      </a>
+    </nav>
+
+    <div class="sidebar-sheets-status" id="sheetsStatus">
+      <div class="sheets-dot"></div>
+      <span>Google Sheets</span>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <main class="admin-main">
+
+    <!-- Top Bar -->
+    <div class="admin-topbar">
+      <div class="admin-page-title" id="pageTitle">Dashboard</div>
+      <div class="admin-topbar-right">
+        <div style="display:flex;gap:.5rem">
+          <button class="btn-sync" id="syncBtn" onclick="syncAllToSheets()">🔄 Sync All to Sheets</button>
+        </div>
+        <div class="admin-avatar">OA</div>
+      </div>
+    </div>
+
+    <!-- ── DASHBOARD TAB ── -->
+    <div class="admin-tab active" id="tab-dashboard">
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)">💰</div>
+          <div class="kpi-value" id="kpi-revenue">$0</div>
+          <div class="kpi-label">Total Revenue</div>
+          <div class="kpi-change positive">+12% this month</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)">🛒</div>
+          <div class="kpi-value" id="kpi-orders">0</div>
+          <div class="kpi-label">Total Orders</div>
+          <div class="kpi-change positive">+8 this week</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">🔧</div>
+          <div class="kpi-value" id="kpi-repairs">0</div>
+          <div class="kpi-label">Repair Requests</div>
+          <div class="kpi-change neutral">3 pending</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(192,57,43,0.1);color:var(--danger)">📦</div>
+          <div class="kpi-value" id="kpi-lowstock">0</div>
+          <div class="kpi-label">Out of Stock Items</div>
+          <div class="kpi-change negative">Items out of stock</div>
+        </div>
+      </div>
+
+      <div class="admin-grid-2">
+        <div class="admin-card">
+          <div class="card-header">
+            <div class="card-title">Recent Sales</div>
+            <button class="card-btn" onclick="showTab('sales')">View All →</button>
+          </div>
+          <div id="recentSalesTable">
+            <table class="admin-table">
+              <thead><tr><th>Order ID</th><th>Items</th><th>Total</th><th>Date</th><th>Status</th></tr></thead>
+              <tbody id="recentSalesTbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="admin-card">
+          <div class="card-header">
+            <div class="card-title">Repair Queue</div>
+            <button class="card-btn" onclick="showTab('repairs')">View All →</button>
+          </div>
+          <div id="recentRepairsTable">
+            <table class="admin-table">
+              <thead><tr><th>Ticket</th><th>Customer</th><th>Appliance</th><th>Urgency</th><th>Status</th></tr></thead>
+              <tbody id="recentRepairsTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- Viewing Requests -->
+      <div class="admin-card" style="margin-top:1.5rem">
+        <div class="card-header">
+          <div class="card-title">👀 Viewing Requests</div>
+          <button class="card-btn" onclick="clearViewRequests()">Clear All</button>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Date</th><th>Name</th><th>Phone</th><th>Email</th><th>Appliance</th><th>Best Time</th></tr></thead>
+          <tbody id="viewRequestsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── SALES TAB ── -->
+    <div class="admin-tab" id="tab-sales">
+      <div class="admin-card">
+        <div class="card-header">
+          <div class="card-title">Sales History</div>
+          <div style="display:flex;gap:.5rem">
+            <button class="card-btn primary" onclick="syncSalesToSheets()">🔄 Sync Sheets</button>
+            <button class="card-btn" onclick="exportCSV('sales')">📥 Export CSV</button>
+          </div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Order ID</th><th>Items</th><th>Total</th><th>Date & Time</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="salesTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── REPAIRS TAB ── -->
+    <div class="admin-tab" id="tab-repairs">
+      <div class="admin-card">
+        <div class="card-header">
+          <div class="card-title">Repair Requests</div>
+          <div style="display:flex;gap:.5rem">
+            <button class="card-btn primary" onclick="syncRepairsToSheets()">🔄 Sync Sheets</button>
+            <button class="card-btn" onclick="exportCSV('repairs')">📥 Export CSV</button>
+          </div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Ticket ID</th><th>Customer</th><th>Phone</th><th>Appliance</th><th>Brand</th><th>Urgency</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="repairsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── LEDGER TAB ── -->
+    <div class="admin-tab" id="tab-ledger">
+      <div class="admin-card" style="margin-bottom:1.5rem">
+        <div class="card-header">
+          <div style="display:flex;align-items:center;gap:1rem">
+            <div class="card-title">💰 Financial Ledger</div>
+            <button onclick="showAddRepairRevenueModal()" style="padding:.4rem .9rem;background:var(--success);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:var(--font-body);font-size:.78rem;font-weight:600">+ Add Repair Revenue</button>
+          </div>
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <select id="ledgerFilter" onchange="renderLedger()" style="border:1px solid var(--gray-light);border-radius:6px;padding:.35rem .6rem;font-size:.78rem;font-family:var(--font-body);color:var(--navy)">
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="year">This Year</option>
+            </select>
+            <button class="card-btn" onclick="exportLedgerCSV()">⬇ Export CSV</button>
+          </div>
+        </div>
+        <div class="kpi-grid" style="margin-bottom:1.5rem">
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)">💵</div>
+            <div class="kpi-value" id="ledger-revenue">$0</div>
+            <div class="kpi-label">Sales Revenue</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)">🛒</div>
+            <div class="kpi-value" id="ledger-orders">0</div>
+            <div class="kpi-label">Orders</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">📦</div>
+            <div class="kpi-value" id="ledger-avg">$0</div>
+            <div class="kpi-label">Avg Order Value</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:rgba(26,111,168,0.08);color:var(--ocean)">🏷</div>
+            <div class="kpi-value" id="ledger-tax">$0</div>
+            <div class="kpi-label">Tax Collected</div>
+          </div>
+        </div>
+        <div id="ledger-panel-sales">
+          <table class="admin-table">
+            <thead><tr><th>Date</th><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Fulfillment</th><th>Status</th><th>Invoice</th></tr></thead>
+            <tbody id="ledgerTbody"></tbody>
+          </table>
+        </div>
+        <div id="ledger-panel-repairs" style="display:none">
+          <table class="admin-table">
+            <thead><tr><th>Date</th><th>Ticket / Description</th><th>Customer</th><th>Amount ($)</th><th>Notes</th><th>Invoice</th><th>Actions</th></tr></thead>
+            <tbody id="repairRevTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── INVENTORY TAB ── -->
+    <div class="admin-tab" id="tab-inventory">
+      <div class="admin-card">
+        <div class="card-header">
+          <div class="card-title">Inventory Management</div>
+          <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+            <button class="card-btn primary" onclick="showAddProduct()">+ Add Product</button>
+            <button class="card-btn primary" onclick="saveAllInventory()">💾 Save All</button>
+            <button class="card-btn primary" onclick="syncInventoryToSheets()">🔄 Sync Sheets</button>
+            <button class="card-btn" onclick="exportCSV('inventory')">📥 CSV</button>
+          </div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>ID</th><th>Product</th><th>Category</th><th>Condition</th><th>MSRP / Comp</th><th>Storage</th><th>Image</th><th>Price ($)</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="inventoryTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  
+    <!-- Add Product Modal -->
+    <div id="addProductModal" style="display:none;position:fixed;inset:0;background:rgba(26,46,68,.5);backdrop-filter:blur(4px);z-index:5000;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--white);border-radius:var(--radius-lg);max-width:520px;width:100%;box-shadow:0 32px 80px rgba(26,46,68,.25);overflow:hidden">
+        <div style="background:var(--navy);padding:1.25rem 1.75rem;display:flex;justify-content:space-between;align-items:center">
+          <div style="font-family:var(--font-display);font-size:1.2rem;font-weight:600;color:var(--white)">Add New Product</div>
+          <button onclick="hideAddProduct()" style="background:rgba(255,255,255,.1);border:none;color:var(--white);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1rem">✕</button>
+        </div>
+        <form id="addProductForm" style="padding:1.75rem" onsubmit="event.preventDefault();submitNewProduct()">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.875rem">
+            <div style="grid-column:1/-1">
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Product Name *</label>
+              <input id="np-name" type="text" placeholder="e.g. Samsung 28 cu ft French Door" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Brand *</label>
+              <input id="np-brand" type="text" placeholder="e.g. Samsung" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Category *</label>
+              <select id="np-category" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;appearance:none;box-sizing:border-box">
+                <option value="">Select…</option>
+                <option value="refrigerator">Refrigerator</option>
+                <option value="washer">Washer</option>
+                <option value="dryer">Dryer</option>
+                <option value="dishwasher">Dishwasher</option>
+                <option value="oven">Oven / Range</option>
+                <option value="microwave">Microwave</option>
+                <option value="freezer">Freezer</option>
+                <option value="vacuum">Vacuum</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Price ($) *</label>
+              <input id="np-price" type="number" placeholder="999" min="0" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Stock Qty *</label>
+              <input id="np-stock" type="number" placeholder="1" min="0" value="1" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Model / SKU</label>
+              <input id="np-model" type="text" placeholder="Optional" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Storage Location</label>
+              <input id="np-location" type="text" placeholder="e.g. Unit A, Warehouse 2" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Condition *</label>
+              <select id="np-condition" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;appearance:none;box-sizing:border-box">
+                <option value="New">New (Sealed/Boxed)</option>
+                <option value="New (Open Box)">New (Open Box)</option>
+                <option value="Used - Excellent">Used – Excellent</option>
+                <option value="Used - Good">Used – Good</option>
+                <option value="Used - Fair">Used – Fair</option>
+                <option value="For Parts">For Parts</option>
+              </select>
+            </div>
+            <div style="grid-column:1/-1">
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Description</label>
+              <textarea id="np-desc" placeholder="Brief product description…" rows="2" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;resize:vertical;box-sizing:border-box"></textarea>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">MSRP / Retail Price ($)</label>
+              <input id="np-msrp" type="number" placeholder="e.g. 1299" min="0" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+              <div style="font-size:.68rem;color:var(--gray-mid);margin-top:.25rem">Used to show savings. Leave blank if unknown.</div>
+            </div>
+            <div>
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Competitor / Reference Price ($)</label>
+              <input id="np-refprice" type="number" placeholder="e.g. Lowes $899" min="0" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+              <div style="font-size:.68rem;color:var(--gray-mid);margin-top:.25rem">e.g. current Lowe's / Home Depot price</div>
+            </div>
+            <div style="grid-column:1/-1">
+              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Product Image URL</label>
+              <input id="np-image" type="url" placeholder="https://… (paste image link from Google Drive, Imgur, etc.)" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
+              <div style="font-size:.68rem;color:var(--gray-mid);margin-top:.25rem">Paste a direct image URL. For multiple images, separate with commas.</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:.75rem;margin-top:1.25rem">
+            <button type="submit" style="flex:1;background:linear-gradient(135deg,var(--ocean),var(--ocean-light));color:var(--white);border:none;padding:.875rem;border-radius:10px;font-family:var(--font-body);font-size:.9rem;font-weight:600;cursor:pointer">Add to Inventory</button>
+            <button type="button" onclick="hideAddProduct()" style="flex:1;background:none;border:2px solid var(--gray-light);color:var(--gray-dark);padding:.875rem;border-radius:10px;font-family:var(--font-body);font-size:.875rem;font-weight:500;cursor:pointer">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Sheets Config Modal -->
+<div class="modal-overlay" id="sheetsModal" style="display:none;opacity:1;pointer-events:all">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-name" style="font-size:1.3rem">🔗 Connect Google Sheets</div>
+      <button class="modal-close" onclick="document.getElementById('sheetsModal').style.display='none'">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:.85rem;color:var(--gray-mid);margin-bottom:1.5rem">Enter your Google Apps Script Web App URL to enable real-time syncing of sales, repairs, and inventory.</p>
+      <div class="form-group">
+        <label>Apps Script URL</label>
+        <input type="url" id="sheetsUrlInput" placeholder="https://script.google.com/macros/s/..." style="width:100%" />
+      </div>
+      <button class="btn-primary" style="width:100%" onclick="saveSheetUrl()">Save & Connect</button>
+      <p style="font-size:.75rem;color:var(--gray-mid);margin-top:1rem;text-align:center">See <code>google-apps-script.js</code> in your project for setup instructions.</p>
+    </div>
+  </div>
+</div>
+
+<script src="../js/logo.js"></script>
+<script src="../js/products.js"></script>
+<script src="admin.js"></script>
+
+  <!-- ── INVOICE MODAL ── -->
+  <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">
+    <div id="invoiceDoc" style="background:#fff;width:680px;max-width:95vw;margin:2rem auto;border-radius:12px;padding:3rem;font-family:'Jost',sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div id="invoiceContent"></div>
+      <div id="invoiceActions" style="margin-top:2rem;display:flex;gap:.75rem;justify-content:flex-end">
+        <button onclick="window.print()" style="padding:.7rem 1.4rem;background:var(--navy);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:var(--font-body);font-weight:600">🖨 Print / Save PDF</button>
+        <button onclick="document.getElementById('invoiceOverlay').style.display='none'" style="padding:.7rem 1.4rem;background:var(--gray-light);color:var(--navy);border:none;border-radius:8px;cursor:pointer;font-family:var(--font-body);font-weight:600">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ADD REPAIR REVENUE MODAL ── -->
+  <div id="repairRevModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:14px;padding:2rem;width:440px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="font-size:1.1rem;font-weight:700;color:var(--navy);margin-bottom:1.25rem">+ Add Repair Revenue</div>
+      <div style="display:grid;gap:.75rem">
+        <div>
+          <label style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.3rem">Date</label>
+          <input id="rr-date" type="date" style="width:100%;padding:.65rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.3rem">Ticket ID / Description</label>
+          <input id="rr-desc" type="text" placeholder="e.g. TKT-1001 or Washer repair" style="width:100%;padding:.65rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.3rem">Customer Name</label>
+          <input id="rr-customer" type="text" placeholder="Customer name" style="width:100%;padding:.65rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.3rem">Amount Charged ($)</label>
+          <input id="rr-amount" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:.65rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.3rem">Notes (optional)</label>
+          <input id="rr-notes" type="text" placeholder="Parts replaced, labor details, etc." style="width:100%;padding:.65rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;box-sizing:border-box"/>
+        </div>
+      </div>
+      <div style="display:flex;gap:.75rem;margin-top:1.5rem">
+        <button onclick="saveRepairRevenue()" style="flex:1;padding:.8rem;background:var(--ocean);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:var(--font-body);font-weight:600">Add Entry</button>
+        <button onclick="document.getElementById('repairRevModal').style.display='none'" style="flex:1;padding:.8rem;background:var(--gray-light);color:var(--navy);border:none;border-radius:8px;cursor:pointer;font-family:var(--font-body);font-weight:600">Cancel</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
