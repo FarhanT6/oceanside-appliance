@@ -398,11 +398,12 @@ function renderInventory() {
 
   function row(p) {
     const id = esc(p.id);
-    const img = String(p.imageUrl || '').split(/[\s,]+/).filter(Boolean)[0];
+    const img = String(p.imageUrl || '').split(/[\s,]+/).filter(Boolean)[0] || String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean)[0];
+    const noWeb = !String(p.imageUrl || '').trim();
     return `<tr class="${p.stock <= 0 ? 'faded' : ''}">
       <td><button class="inv-thumb" onclick="openProductEditor('${id}')" title="Edit / add photos">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : ic('camera')}</button></td>
       <td class="wrap">
-        <div style="font-weight:600;color:var(--navy)">${esc(p.name)}${p.draft ? ' <span class="draft-tag" title="Hidden from the website until you publish it">Draft</span>' : ''}</div>
+        <div style="font-weight:600;color:var(--navy)">${esc(p.name)}${p.draft ? ' <span class="draft-tag" title="Hidden from the website until you publish it">Draft</span>' : ''}${p.imagesAutoPicked ? ' <span class="draft-tag img" title="Website images were picked automatically — open to review">Check images</span>' : ''}${noWeb ? ' <span class="draft-tag img" title="No website image yet — customers see an icon">No web image</span>' : ''}</div>
         <div style="font-size:.74rem;color:var(--gray-mid)">${esc([p.brand, p.category, p.model].filter(Boolean).join(' · '))}</div>
       </td>
       <td><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>

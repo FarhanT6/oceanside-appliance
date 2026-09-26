@@ -245,6 +245,7 @@ function renderProducts(list) {
           ${p.condition ? `<span class="tag ${isNew(p) ? 'new' : 'used'}">${esc(p.condition)}</span>` : ''}
           ${save && !out ? `<span class="tag save">Save ${money(save)}</span>` : ''}
         </div>
+        ${p.stockPhotos && imgs.length ? '<span class="stock-photo-tag">Stock photo</span>' : ''}
       </div>
       <div class="product-info">
         <div class="product-category">${esc([p.brand, catLabel].filter(Boolean).join(' · '))}</div>
@@ -278,6 +279,7 @@ function openModal(id) {
   document.getElementById('modalBody').innerHTML = `
     <div class="pm-gallery">
       <div class="pm-main">${imgs.length ? `<img id="pmMainImg" src="${esc(imgs[0])}" alt="${esc(p.name)}" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}</div>
+      ${p.stockPhotos && imgs.length ? `<div class="stock-photo-note">${icon('alert')}Stock photo of this model${isNew(p) ? '' : ' — the actual unit is ' + esc(p.condition || 'used') + '. Ask to see it in person.'}</div>` : ''}
       ${imgs.length > 1 ? `<div class="pm-thumbs">${imgs.map((src, i) => `<button type="button" data-src="${esc(src)}" aria-label="Photo ${i + 1}" aria-current="${i === 0}"><img src="${esc(src)}" alt="" loading="lazy" /></button>`).join('')}</div>` : ''}
     </div>
     <div class="pm-info">
