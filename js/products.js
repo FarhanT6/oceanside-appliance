@@ -29,7 +29,7 @@ function normalizeProduct(p) {
 }
 
 function setProducts(list, state) {
-  PRODUCTS = (Array.isArray(list) ? list : []).map(normalizeProduct).filter(p => p.id);
+  PRODUCTS = (Array.isArray(list) ? list : []).filter(p => p && !p.draft).map(normalizeProduct).filter(p => p.id);
   productsState = state;
   buildBrandOptions();
   renderCategoryChips();

@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="../css/styles.css?v=7" />
-  <link rel="stylesheet" href="admin.css?v=7" />
+  <link rel="stylesheet" href="../css/styles.css?v=8" />
+  <link rel="stylesheet" href="admin.css?v=8" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -302,6 +302,7 @@
           <div class="card-title">Inventory</div>
           <div class="card-tools">
             <input type="search" class="table-search" id="inventorySearch" placeholder="Search products…" oninput="renderInventory()" />
+            <button class="card-btn ai" onclick="openBulkImport()"><svg class="ic"><use href="../img/icons.svg#i-camera"/></svg> Bulk add from photos</button>
             <button class="card-btn primary" onclick="openProductEditor()"><svg class="ic"><use href="../img/icons.svg#i-plus"/></svg> Add Product</button>
             <button class="card-btn primary" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save All</button>
             <button class="card-btn primary" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
@@ -343,8 +344,9 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=7"></script>
-<script src="admin-tools.js?v=7"></script>
+<script src="admin.js?v=8"></script>
+<script src="admin-tools.js?v=8"></script>
+<script src="bulk-import.js?v=8"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

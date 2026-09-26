@@ -40,7 +40,7 @@ function searchValue(id) { return (document.getElementById(id)?.value || '').tri
 
 // Keep the storefront's cached copy in sync when this browser also browses the shop
 function syncStorefront() {
-  localStorage.setItem('oa_products_cache', JSON.stringify({ at: Date.now(), products: getInventory() }));
+  localStorage.setItem('oa_products_cache', JSON.stringify({ at: Date.now(), products: getInventory().filter(p => !p.draft) }));
 }
 
 function getInventory() {
@@ -402,7 +402,7 @@ function renderInventory() {
     return `<tr class="${p.stock <= 0 ? 'faded' : ''}">
       <td><button class="inv-thumb" onclick="openProductEditor('${id}')" title="Edit / add photos">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : ic('camera')}</button></td>
       <td class="wrap">
-        <div style="font-weight:600;color:var(--navy)">${esc(p.name)}</div>
+        <div style="font-weight:600;color:var(--navy)">${esc(p.name)}${p.draft ? ' <span class="draft-tag" title="Hidden from the website until you publish it">Draft</span>' : ''}</div>
         <div style="font-size:.74rem;color:var(--gray-mid)">${esc([p.brand, p.category, p.model].filter(Boolean).join(' · '))}</div>
       </td>
       <td><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>

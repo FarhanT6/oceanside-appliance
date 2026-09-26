@@ -18,6 +18,7 @@
 //     POST {type:'admin_ai_repair',  key, ticketId, force}  → AI: repair diagnosis + text draft
 //     POST {type:'admin_ai_listing', key, productId, …}     → AI: marketplace listing text
 //     POST {type:'admin_ai_price', key, product}            → AI agent: researches prices on the web
+//     POST {type:'admin_ai_group', key, photos}             → AI: groups a batch of photos by appliance
 //     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //
 //   AI SETUP (optional): Project Settings → Script properties → add
@@ -132,7 +133,7 @@ const PUBLIC_PRODUCT_FIELDS = ['id', 'name', 'brand', 'category', 'condition', '
 function doGet(e) {
   const action = (e && e.parameter && e.parameter.action) || '';
   if (action === 'products' || action === 'getProducts') {
-    const products = readCollection('inventory').map(p => {
+    const products = readCollection('inventory').filter(p => !p.draft).map(p => {
       const out = {};
       PUBLIC_PRODUCT_FIELDS.forEach(k => { if (p[k] !== undefined && p[k] !== '') out[k] = p[k]; });
       return out;
@@ -173,6 +174,7 @@ function doPost(e) {
     if (type === 'admin_ai_repair')    return jsonResponse(aiRepairEndpoint(data));
     if (type === 'admin_ai_listing')   return jsonResponse(aiListing(data));
     if (type === 'admin_ai_price')     return jsonResponse(aiPriceResearch(data));
+    if (type === 'admin_ai_group')     return jsonResponse(aiGroupPhotos(data));
     if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_upsert') {
       requireCollection(data.collection);
@@ -660,6 +662,63 @@ function aiListing(d) {
       (d.asIs ? '\nFinish with the line: Sold as-is.' : '') }]
   });
   return { success: true, title: String(result.title || '').slice(0, 100), body: String(result.body || '') };
+}
+
+// ─── PHOTO GROUPING (bulk import) ───
+// Photos arrive as small previews in the order they were taken. Claude decides
+// which consecutive photos show the same appliance and flags the ones with a
+// readable label; the browser then reads the details from the full-size photos.
+function aiGroupPhotos(d) {
+  const photos = (Array.isArray(d.photos) ? d.photos : []).slice(0, 30);
+  if (!photos.length) return fail('No photos received.');
+  const content = [];
+  photos.forEach((ph, i) => {
+    const gap = i > 0 && ph.time && photos[i - 1].time
+      ? Math.round((new Date(ph.time) - new Date(photos[i - 1].time)) / 1000) : null;
+    content.push({ type: 'text', text: `Photo ${i}` + (gap !== null ? ` (taken ${gap}s after photo ${i - 1})` : '') });
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: String(ph.data || '') } });
+  });
+  content.push({ type: 'text', text: `Group these ${photos.length} photos (numbered 0-${photos.length - 1}) by appliance.` });
+
+  const result = callClaude({
+    effort: 'medium',
+    maxTokens: 16000,
+    schema: strictObject({
+      groups: { type: 'array', items: strictObject({
+        photoIndexes: { type: 'array', items: { type: 'integer' } },
+        labelPhotoIndexes: { type: 'array', items: { type: 'integer' }, description: 'Photos in this group that show a model/serial sticker, rating plate, energy guide or box label.' },
+        category: { type: 'string', enum: APPLIANCE_CATEGORIES },
+        brand: { type: 'string' },
+        looksLike: { type: 'string', description: 'Short description, e.g. "white top-load washer, in box".' },
+        inBox: { type: 'boolean' },
+        confidence: { type: 'string', enum: ['high', 'medium', 'low'] }
+      }) }
+    }),
+    system: 'You sort photos taken at an appliance store. The photos are in the order they were taken; the staff member ' +
+      'photographed one appliance from several angles (in and out of the box, close-ups of stickers and labels) before moving to the next. ' +
+      'Group consecutive photos that show the same physical appliance. Start a new group when the appliance clearly changes ' +
+      '(different type, color, finish, model, box, or surroundings) — a long time gap is a strong hint of a new appliance. ' +
+      'A close-up of a sticker or box label belongs with the appliance photographed right before or after it. ' +
+      'Every photo index must appear in exactly one group. Keep groups in photo order. If unsure, keep a photo with its neighbors and lower the confidence.',
+    content: content
+  });
+
+  // Make sure every photo is used exactly once
+  const seen = {};
+  const groups = (result.groups || []).map(g => {
+    const idx = (g.photoIndexes || []).filter(i => Number.isInteger(i) && i >= 0 && i < photos.length && !seen[i]);
+    idx.forEach(i => { seen[i] = true; });
+    return Object.assign({}, g, { photoIndexes: idx.sort((a, b) => a - b), labelPhotoIndexes: (g.labelPhotoIndexes || []).filter(i => idx.indexOf(i) >= 0) });
+  }).filter(g => g.photoIndexes.length);
+  for (let i = 0; i < photos.length; i++) {
+    if (seen[i]) continue;
+    // attach a missed photo to the group holding its nearest earlier photo
+    let target = groups.find(g => g.photoIndexes.indexOf(i - 1) >= 0) || groups[groups.length - 1];
+    if (!target) { target = { photoIndexes: [], labelPhotoIndexes: [], category: 'other', brand: '', looksLike: '', inBox: false, confidence: 'low' }; groups.push(target); }
+    target.photoIndexes.push(i); target.photoIndexes.sort((a, b) => a - b); target.confidence = 'low';
+  }
+  groups.sort((a, b) => a.photoIndexes[0] - b.photoIndexes[0]);
+  return { success: true, groups: groups };
 }
 
 // ─── PRICING AGENT ───
