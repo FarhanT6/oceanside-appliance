@@ -231,7 +231,7 @@
 
 .kpi-change.positive { color: var(--success); }
 .kpi-change.negative { color: var(--danger); }
-.kpi-change.neutral  { color: var(--gold); }
+.kpi-change.neutral  { color: var(--gray-mid); }
 
 /* ── GRID ── */
 .admin-grid-2 {
@@ -390,11 +390,49 @@
   .admin-grid-2 { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 768px) {
-  .admin-sidebar { width: 60px; }
-  .sidebar-logo div:last-child, .sidebar-link span + *, .sidebar-sheets-status span { display: none; }
-  .admin-main { margin-left: 60px; }
-  .kpi-grid { grid-template-columns: 1fr 1fr; }
+.sidebar-icon { width: 1.4rem; text-align: center; flex-shrink: 0; }
+.sidebar-label { white-space: nowrap; }
+.admin-card { overflow-x: auto; min-width: 0; }
+.admin-main, .admin-tab, .admin-tab > * { min-width: 0; }
+.admin-table th, .admin-table td { white-space: nowrap; }
+.admin-table td[style*="max-width"] { white-space: normal; }
+
+/* Narrow window: icon-only sidebar */
+@media (max-width: 1000px) {
+  .admin-sidebar { width: 72px; padding: 1rem 0; }
+  .sidebar-logo { justify-content: center; padding: 0 0 1rem; }
+  .sidebar-logo-text, .sidebar-label, #sheetsStatusLabel { display: none; }
+  .sidebar-nav { padding: 0 .6rem; }
+  .sidebar-link { justify-content: center; padding: .75rem 0; font-size: 1.1rem; }
+  .sidebar-divider { margin: .75rem .5rem; }
+  .sidebar-sheets-status { justify-content: center; padding: 1rem 0; }
+  .sheets-dot { width: 10px; height: 10px; }
+  .admin-main { margin-left: 72px; }
+  .admin-tab { padding: 1.25rem; }
+  .admin-topbar { padding: .85rem 1.25rem; }
+}
+
+/* Phone: menu becomes a bottom tab bar */
+@media (max-width: 600px) {
+  .admin-sidebar {
+    top: auto; bottom: 0; width: 100%; height: auto; padding: .35rem .5rem calc(.35rem + env(safe-area-inset-bottom));
+    flex-direction: row; align-items: center; overflow: visible; box-shadow: 0 -6px 24px rgba(0,0,0,.18);
+  }
+  .sidebar-logo, .sidebar-divider { display: none; }
+  .sidebar-nav { display: flex; flex: 1; padding: 0; gap: .15rem; }
+  .sidebar-link { flex: 1; flex-direction: column; gap: .15rem; padding: .45rem 0; margin: 0; font-size: 1.15rem; }
+  .sidebar-label { display: block; font-size: .6rem; letter-spacing: .02em; }
+  .sidebar-sheets-status { border-top: none; padding: .5rem; flex-shrink: 0; }
+  .admin-main { margin-left: 0; padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .admin-topbar { padding: .75rem 1rem; }
+  .admin-page-title { font-size: 1.25rem; }
+  .admin-avatar { display: none; }
+  .admin-tab { padding: 1rem; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .kpi-card { padding: 1rem; }
+  .kpi-value { font-size: 1.5rem; }
+  .card-header { flex-wrap: wrap; gap: .75rem; }
+  .admin-card { padding: 1rem; }
 }
 
 @media print {
