@@ -169,6 +169,10 @@ function renderDashboard() {
   document.getElementById('kpi-orders').textContent   = sales.filter(o => o.status === 'pending').length;
   document.getElementById('kpi-repairs').textContent  = repairs.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled').length;
   document.getElementById('kpi-lowstock').textContent = inv.filter(i => i.stock <= 0).length;
+  const setSub = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  setSub('kpi-orders-sub', `${sales.length} order${sales.length !== 1 ? 's' : ''} total`);
+  setSub('kpi-repairs-sub', `${repairs.length} request${repairs.length !== 1 ? 's' : ''} total`);
+  setSub('kpi-lowstock-sub', `${inv.length} product${inv.length !== 1 ? 's' : ''} listed`);
 
   const recentSales = [...sales].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
   document.getElementById('recentSalesTbody').innerHTML = recentSales.map(s => `

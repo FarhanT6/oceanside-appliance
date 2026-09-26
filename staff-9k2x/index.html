@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="../css/styles.css" />
-  <link rel="stylesheet" href="admin.css" />
+  <link rel="stylesheet" href="../css/styles.css?v=3" />
+  <link rel="stylesheet" href="admin.css?v=3" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -80,36 +80,36 @@
   <!-- ── SIDEBAR ── -->
   <aside class="admin-sidebar">
     <div class="sidebar-logo">
-      <div class="nav-logo-icon">🌊</div>
-      <div>
+      <div class="nav-logo-icon"></div>
+      <div class="sidebar-logo-text">
         <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:600;color:var(--white)">Oceanside</div>
         <div style="font-size:0.7rem;color:rgba(255,255,255,0.4);letter-spacing:.1em;text-transform:uppercase">Admin Panel</div>
       </div>
     </div>
 
     <nav class="sidebar-nav">
-      <a href="#" class="sidebar-link active" data-tab="dashboard">
-        <span>📊</span> Dashboard
+      <a href="#" class="sidebar-link active" data-tab="dashboard" title="Dashboard">
+        <span class="sidebar-icon">📊</span><span class="sidebar-label">Dashboard</span>
       </a>
-      <a href="#" class="sidebar-link" data-tab="sales">
-        <span>💰</span> Sales
+      <a href="#" class="sidebar-link" data-tab="sales" title="Sales">
+        <span class="sidebar-icon">💰</span><span class="sidebar-label">Sales</span>
       </a>
-      <a href="#" class="sidebar-link" data-tab="repairs">
-        <span>🔧</span> Repair Requests
+      <a href="#" class="sidebar-link" data-tab="repairs" title="Repair Requests">
+        <span class="sidebar-icon">🔧</span><span class="sidebar-label">Repairs</span>
       </a>
-      <a href="#" class="sidebar-link" data-tab="inventory">
-        <span>📦</span> Inventory
+      <a href="#" class="sidebar-link" data-tab="inventory" title="Inventory">
+        <span class="sidebar-icon">📦</span><span class="sidebar-label">Inventory</span>
       </a>
       <div class="sidebar-divider"></div>
-      <a href="#" class="sidebar-link" data-tab="ledger" onclick="showTab('ledger');return false;">
-        <span class="sidebar-icon">📒</span> Ledger
+      <a href="#" class="sidebar-link" data-tab="ledger" title="Ledger">
+        <span class="sidebar-icon">📒</span><span class="sidebar-label">Ledger</span>
       </a>
-      <a href="../index.html" class="sidebar-link">
-        <span>🏠</span> View Website
+      <a href="../index.html" class="sidebar-link" title="View Website">
+        <span class="sidebar-icon">🏠</span><span class="sidebar-label">Website</span>
       </a>
     </nav>
 
-    <div class="sidebar-sheets-status" id="sheetsStatus">
+    <div class="sidebar-sheets-status" id="sheetsStatus" title="Google Sheets connection — click to change settings">
       <div class="sheets-dot"></div>
       <span id="sheetsStatusLabel">Google Sheets</span>
     </div>
@@ -136,25 +136,25 @@
           <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)">💰</div>
           <div class="kpi-value" id="kpi-revenue">$0</div>
           <div class="kpi-label">Total Revenue</div>
-          <div class="kpi-change positive">+12% this month</div>
+          <div class="kpi-change neutral" id="kpi-revenue-sub">Excludes cancelled orders</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)">🛒</div>
           <div class="kpi-value" id="kpi-orders">0</div>
           <div class="kpi-label">Pending Orders</div>
-          <div class="kpi-change positive">+8 this week</div>
+          <div class="kpi-change neutral" id="kpi-orders-sub"></div>
         </div>
         <div class="kpi-card">
           <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">🔧</div>
           <div class="kpi-value" id="kpi-repairs">0</div>
           <div class="kpi-label">Open Repair Requests</div>
-          <div class="kpi-change neutral">3 pending</div>
+          <div class="kpi-change neutral" id="kpi-repairs-sub"></div>
         </div>
         <div class="kpi-card">
           <div class="kpi-icon" style="background:rgba(192,57,43,0.1);color:var(--danger)">📦</div>
           <div class="kpi-value" id="kpi-lowstock">0</div>
           <div class="kpi-label">Out of Stock Items</div>
-          <div class="kpi-change negative">Items out of stock</div>
+          <div class="kpi-change neutral" id="kpi-lowstock-sub"></div>
         </div>
       </div>
 
@@ -420,8 +420,8 @@
   </div>
 </div>
 
-<script src="../js/logo.js"></script>
-<script src="admin.js"></script>
+<script src="../js/logo.js?v=3"></script>
+<script src="admin.js?v=3"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">
