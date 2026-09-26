@@ -94,14 +94,16 @@ The AI runs inside Apps Script, so the API key never appears in the website code
 - **Fill in details from photos** (product editor): reads the photos — including the model sticker — and drafts the name, brand, model, category, description and specs. It never overwrites fields you've already typed.
 - **Repair diagnosis**: likely causes, parts to bring, questions to ask, an urgency level (with a safety warning when needed) and a ready-to-send text message. New requests are diagnosed automatically and emailed to you; you can also run it from any repair.
 - **Polish with AI** (marketplace listing): rewrites the listing using only the product's facts.
+- **Pricing research agent** (product editor → "Research the price online"): searches the web for this model's new retail price and used/sold prices, then suggests an asking price with a range, confidence level and the links it used. One click fills in the price or MSRP. About 10–30¢ per lookup.
+- **Morning briefing** (emailed daily at 7am Pacific): yesterday's and month-to-date revenue, safety alerts, today's scheduled repairs, orders and repairs waiting on you, what came in overnight, items listed 30+ days with a suggested price drop, and AI-picked top priorities. "Send today's briefing" in the staff panel sends one on demand.
 
 **Setup (about 5 minutes):**
 1. Create an API key at console.anthropic.com (add a payment method; typical cost is a few cents per photo fill-in or diagnosis).
 2. Apps Script → ⚙️ **Project Settings** → **Script properties** → **Add script property**: name `ANTHROPIC_API_KEY`, value = your key → Save.
-3. Paste in the latest `google-apps-script.js`, save, then run **`setupAutomations`** once (▶ Run → allow the new permissions). This turns on automatic diagnosis every 10 minutes.
+3. Paste in the latest `google-apps-script.js`, save, then run **`setupAutomations`** once (▶ Run → allow the new permissions). This turns on automatic diagnosis every 10 minutes and the 7am briefing. Re-run it any time — it replaces the old schedule rather than duplicating it.
 4. **Deploy → Manage deployments → ✏️ → New version → Deploy.**
 
-To turn automatic diagnosis off, open ⏰ **Triggers** in Apps Script and delete the `autoTriageRepairs` trigger.
+To turn either automation off, open ⏰ **Triggers** in Apps Script and delete the `autoTriageRepairs` or `sendDailyBriefing` trigger. The briefing works without an API key too — it just skips the AI "top priorities".
 
 ---
 
