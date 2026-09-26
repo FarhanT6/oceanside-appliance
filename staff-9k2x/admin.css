@@ -72,7 +72,7 @@
 }
 
 .sidebar-link.active {
-  background: linear-gradient(135deg, var(--ocean), var(--seafoam));
+  background: linear-gradient(135deg, var(--ocean), var(--ocean-mid));
   color: var(--white);
 }
 
@@ -105,6 +105,7 @@
 }
 
 .sheets-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.sheets-dot.error { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
 
 /* ── MAIN ── */
 .admin-main {
@@ -142,7 +143,7 @@
 }
 
 .btn-sync {
-  background: linear-gradient(135deg, var(--ocean), var(--seafoam));
+  background: linear-gradient(135deg, var(--ocean), var(--ocean-mid));
   color: var(--white);
   border: none;
   padding: 0.5rem 1.25rem;
@@ -289,7 +290,7 @@
 .admin-table th {
   text-align: left;
   padding: 0.6rem 0.875rem;
-  background: var(--sand);
+  background: var(--off-white);
   color: var(--gray-dark);
   font-size: 0.7rem;
   font-weight: 700;
@@ -381,7 +382,7 @@
   transition: var(--transition);
 }
 
-.action-btn:hover { background: var(--sand); }
+.action-btn:hover { background: var(--off-white); }
 
 /* ── RESPONSIVE ── */
 @media (max-width: 1100px) {

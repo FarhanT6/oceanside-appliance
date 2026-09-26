@@ -1,9 +1,13 @@
 // ============================================
 //   OCEANSIDE APPLIANCE — ADMIN JS
-//   Dashboard, Sales, Repairs, Inventory
+//   Dashboard, Sales, Repairs, Inventory, Ledger
+//
+//   Google Sheets is the source of truth. This page keeps a local copy
+//   (localStorage) for speed, pulls fresh data from Sheets on load, and
+//   saves every change back one record at a time.
 // ============================================
 
-// ─── DATA STORES (LocalStorage-backed) ───
+// ─── DATA STORES (local cache of the Sheets data) ───
 function getStore(key) {
   try { return JSON.parse(localStorage.getItem('oa_' + key) || '[]'); }
   catch { return []; }
@@ -15,32 +19,121 @@ function setStore(key, val) {
 function getSales()   { return getStore('sales'); }
 function getRepairs() { return getStore('repairs'); }
 
-// Sync full inventory to storefront-readable key
+// Escape anything that came from a customer or the sheet before putting it in HTML
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Keep the storefront's cached copy in sync when this browser also browses the shop
 function syncStorefront() {
-  const all = getInventory();
-  localStorage.setItem('oa_inventory', JSON.stringify(all));
+  localStorage.setItem('oa_products_cache', JSON.stringify({ at: Date.now(), products: getInventory() }));
 }
 
 function getInventory() {
-  // All products are admin-managed — return everything in storage
   const saved = getStore('inventory');
   return saved.map(p => ({
     ...p,
-    icon: p.icon || '📦',
     stockStatus: p.stock <= 0 ? 'out' : 'in-stock',
   }));
 }
 
-// ─── SILENT AUTO-SYNC ───
-// Called after every state change — fire-and-forget, never blocks the UI
-function autoSyncInventory() {
-  if (SHEETS_URL) logToSheetsAdmin('inventory_full', { inventory: getInventory() });
+// ─── GOOGLE SHEETS API ───
+const SHEETS_WEBHOOK_DEFAULT = 'https://script.google.com/macros/s/AKfycbwTvfY5mJPha_m8HO5lN944sGKcC9Xobl0YlhiUw2vf2LGON4nO8gHOE-hYTP7hB3qm/exec';
+let SHEETS_URL = localStorage.getItem('oa_sheets_url') || SHEETS_WEBHOOK_DEFAULT;
+function getAdminKey() { return localStorage.getItem('oa_admin_key') || ''; }
+
+// Local store key for each Sheets collection
+const COLLECTION_STORE = {
+  inventory: 'inventory', sales: 'sales', repairs: 'repairs',
+  views: 'view_requests', repairRevenue: 'repair_revenue'
+};
+const COLLECTION_ID = { inventory: 'id', sales: 'orderId', repairs: 'ticketId', views: 'requestId', repairRevenue: 'id' };
+
+let sheetsState = 'idle'; // idle | ok | error | nokey
+
+async function apiPost(type, payload = {}) {
+  if (!SHEETS_URL) throw new Error('No Sheets URL configured');
+  const res = await fetch(SHEETS_URL, {
+    method: 'POST',
+    // text/plain keeps this a "simple" request, so Google doesn't need a CORS preflight
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ type, key: getAdminKey(), ...payload })
+  });
+  const json = await res.json();
+  if (!json.success) {
+    const err = new Error(json.error || 'Request failed');
+    err.code = json.error;
+    throw err;
+  }
+  return json;
 }
-function autoSyncSales() {
-  if (SHEETS_URL) logToSheetsAdmin('full_sync', { sales: getSales() });
+
+function handleApiError(e, what) {
+  console.error(what, e);
+  if (e.code === 'unauthorized') {
+    setSheetsState('nokey');
+    showAdminToast('🔑 Staff key missing or wrong — click “Google Sheets” in the sidebar');
+  } else {
+    setSheetsState('error');
+    showAdminToast(`⚠️ ${what} failed — not saved to Google Sheets. Check your connection.`);
+  }
 }
-function autoSyncRepairs() {
-  if (SHEETS_URL) logToSheetsAdmin('full_sync', { repairs: getRepairs() });
+
+// Save / delete individual records — never rewrites data the customer submitted
+async function saveRemote(collection, records) {
+  if (!records.length) return;
+  try {
+    await apiPost('admin_upsert', { collection, records });
+    setSheetsState('ok');
+  } catch (e) { handleApiError(e, 'Save'); }
+}
+async function deleteRemote(collection, ids) {
+  if (!ids.length) return;
+  try {
+    await apiPost('admin_delete', { collection, ids });
+    setSheetsState('ok');
+  } catch (e) { handleApiError(e, 'Delete'); }
+}
+
+// Pull everything from Sheets and replace the local copy
+let pulling = false;
+async function pullFromSheets({ silent = false } = {}) {
+  if (pulling) return;
+  pulling = true;
+  const btn = document.getElementById('syncBtn');
+  if (btn && !silent) { btn.textContent = '⏳ Refreshing…'; btn.disabled = true; }
+  try {
+    const { data } = await apiPost('admin_pull');
+
+    // One-time move of data that only ever lived in this browser up to Sheets
+    if (!localStorage.getItem('oa_migrated_v2')) {
+      for (const [collection, storeKey] of Object.entries(COLLECTION_STORE)) {
+        const idKey = COLLECTION_ID[collection];
+        const remoteIds = new Set((data[collection] || []).map(r => r[idKey]));
+        const localOnly = getStore(storeKey).filter(r => r && r[idKey] && !remoteIds.has(r[idKey]));
+        if (localOnly.length) {
+          await apiPost('admin_upsert', { collection, records: localOnly });
+          data[collection] = [...(data[collection] || []), ...localOnly];
+        }
+      }
+      localStorage.setItem('oa_migrated_v2', new Date().toISOString());
+    }
+
+    for (const [collection, storeKey] of Object.entries(COLLECTION_STORE)) {
+      setStore(storeKey, data[collection] || []);
+    }
+    syncStorefront();
+    setSheetsState('ok');
+    const active = document.querySelector('.sidebar-link.active')?.dataset.tab || 'dashboard';
+    renderTab(active);
+    if (active !== 'dashboard') renderDashboard();
+    if (!silent) showAdminToast('✅ Up to date with Google Sheets');
+  } catch (e) {
+    handleApiError(e, 'Refresh');
+  } finally {
+    pulling = false;
+    if (btn) { btn.textContent = '🔄 Refresh'; btn.disabled = false; }
+  }
 }
 
 // ─── TABS ───
@@ -71,61 +164,66 @@ function renderDashboard() {
   const repairs = getRepairs();
   const inv     = getInventory();
 
-  const revenue = sales.reduce((s, o) => s + (o.total || 0), 0);
-  document.getElementById('kpi-revenue').textContent  = '$' + revenue.toLocaleString();
-  document.getElementById('kpi-orders').textContent   = sales.length;
-  document.getElementById('kpi-repairs').textContent  = repairs.length;
+  const revenue = sales.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (o.total || 0), 0);
+  document.getElementById('kpi-revenue').textContent  = '$' + revenue.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  document.getElementById('kpi-orders').textContent   = sales.filter(o => o.status === 'pending').length;
+  document.getElementById('kpi-repairs').textContent  = repairs.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled').length;
   document.getElementById('kpi-lowstock').textContent = inv.filter(i => i.stock <= 0).length;
 
-  // Recent sales
   const recentSales = [...sales].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
   document.getElementById('recentSalesTbody').innerHTML = recentSales.map(s => `
     <tr>
-      <td><strong>${s.orderId}</strong></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.items}</td>
+      <td><strong>${esc(s.orderId)}</strong></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.items)}">${esc(s.items)}</td>
       <td><strong>$${(s.total||0).toLocaleString()}</strong></td>
       <td>${formatDate(s.timestamp)}</td>
-      <td><span class="status-badge ${s.status}">${s.status}</span></td>
+      <td><span class="status-badge ${esc(s.status)}">${esc(s.status)}</span></td>
     </tr>
   `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No sales yet</td></tr>';
 
   renderViewRequests();
 
-  // Recent repairs
   const recentRepairs = [...repairs].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
   document.getElementById('recentRepairsTbody').innerHTML = recentRepairs.map(r => `
     <tr>
-      <td><strong>${r.ticketId}</strong></td>
-      <td>${r.firstName} ${r.lastName}</td>
-      <td>${r.applianceType}</td>
-      <td><span class="status-badge ${r.status?.toLowerCase().replace(' ','')}">${r.status}</span></td>
+      <td><strong>${esc(r.ticketId)}</strong></td>
+      <td>${esc(r.firstName)} ${esc(r.lastName)}</td>
+      <td style="text-transform:capitalize">${esc(r.applianceType)}</td>
+      <td>${typeTag(r.requestType)}</td>
+      <td><span class="status-badge ${esc((r.status||'').toLowerCase().replace(' ',''))}">${esc(r.status)}</span></td>
     </tr>
   `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No repair requests yet</td></tr>';
 }
 
-// ─── VIEWING REQUESTS ───
-function getViewRequests() {
-  try { return JSON.parse(localStorage.getItem('oa_view_requests') || '[]'); } catch(e) { return []; }
+function typeTag(t) {
+  t = t || 'Repair';
+  const color = t === 'Sell to us' ? '#8e44ad' : t === 'Other' ? '#7f8c8d' : '#1a7fc1';
+  return `<span style="display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.68rem;font-weight:700;color:${color};background:${color}1a">${esc(t)}</span>`;
 }
 
+// ─── VIEWING REQUESTS ───
+function getViewRequests() { return getStore('view_requests'); }
+
 function renderViewRequests() {
-  const reqs = getViewRequests();
+  const reqs = [...getViewRequests()].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
   const tbody = document.getElementById('viewRequestsTbody');
   if (!tbody) return;
   tbody.innerHTML = reqs.map(r => `<tr>
     <td style="font-size:.78rem">${formatDate(r.timestamp)}</td>
-    <td><strong>${r.name||'—'}</strong></td>
-    <td>${r.phone||'—'}</td>
-    <td style="font-size:.8rem">${r.email||'—'}</td>
-    <td style="font-size:.82rem">${r.appliance||'—'}${r.brand?' · '+r.brand:''}</td>
-    <td style="font-size:.78rem;color:var(--gray-mid)">${r.preferredTime||'—'}</td>
+    <td><strong>${esc(r.name)||'—'}</strong></td>
+    <td><a href="tel:${esc(r.phone)}" style="color:inherit">${esc(r.phone)||'—'}</a></td>
+    <td style="font-size:.8rem">${esc(r.email)||'—'}</td>
+    <td style="font-size:.82rem">${esc(r.appliance)||'—'}${r.brand?' · '+esc(r.brand):''}</td>
+    <td style="font-size:.78rem;color:var(--gray-mid)">${esc(r.preferredTime)||'—'}</td>
   </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No viewing requests yet.</td></tr>';
 }
 
 function clearViewRequests() {
-  if (!confirm('Clear all viewing requests? This cannot be undone.')) return;
-  localStorage.removeItem('oa_view_requests');
+  const reqs = getViewRequests();
+  if (!reqs.length || !confirm('Clear all viewing requests? This removes them from Google Sheets too.')) return;
+  setStore('view_requests', []);
   renderViewRequests();
+  deleteRemote('views', reqs.map(r => r.requestId).filter(Boolean));
   showAdminToast('🗑️ Viewing requests cleared');
 }
 
@@ -135,21 +233,22 @@ function renderSales() {
   const active = all.filter(s => s.status !== 'completed' && s.status !== 'cancelled');
   const done   = all.filter(s => s.status === 'completed' || s.status === 'cancelled');
 
-  function row(s) {
+  function row(s, faded) {
     const statusColor = s.status === 'pending' ? '#e67e22' : s.status === 'completed' ? '#27ae60' : '#c0392b';
-    return `<tr>
-      <td><strong>${s.orderId}</strong></td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${s.items}">${s.items}</td>
+    const id = esc(s.orderId);
+    return `<tr${faded ? ' style="opacity:.65"' : ''}>
+      <td><strong>${id}</strong><br><small style="color:var(--gray-mid)">${esc(s.firstName)} ${esc(s.lastName)} · <a href="tel:${esc(s.phone)}" style="color:inherit">${esc(s.phone)}</a></small></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.items)}">${esc(s.items)}</td>
       <td><strong>$${(s.total||0).toLocaleString()}</strong></td>
       <td>${formatDate(s.timestamp)}</td>
       <td>
-        <select onchange="updateSaleStatus('${s.orderId}', this.value)" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .5rem;font-size:.78rem;font-family:var(--font-body);color:${statusColor};font-weight:600">
+        <select onchange="updateSaleStatus('${id}', this.value)" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .5rem;font-size:.78rem;font-family:var(--font-body);color:${statusColor};font-weight:600">
           <option ${s.status==='pending'?'selected':''}>pending</option>
           <option ${s.status==='completed'?'selected':''}>completed</option>
           <option ${s.status==='cancelled'?'selected':''}>cancelled</option>
         </select>
       </td>
-      <td><button class="action-btn" onclick="deleteSale('${s.orderId}')" title="Delete">🗑️</button></td>
+      <td><button class="action-btn" onclick="deleteSale('${id}')" title="Delete">🗑️</button></td>
     </tr>`;
   }
 
@@ -159,11 +258,11 @@ function renderSales() {
   let html = '';
   if (active.length) {
     html += sectionHeader('🔔 Needs Attention', active.length, '#e67e22');
-    html += active.map(row).join('');
+    html += active.map(s => row(s, false)).join('');
   }
   if (done.length) {
     html += sectionHeader('✓ Completed / Cancelled', done.length, '#7f8c8d');
-    html += done.map(s => `<tr style="opacity:.65">${row(s).replace('<tr>','')}`).join('');
+    html += done.map(s => row(s, true)).join('');
   }
   if (!all.length) {
     html = '<tr><td colspan="6" style="text-align:center;color:var(--gray-mid);padding:2rem">No orders yet.<br><small>Orders will appear here when customers checkout.</small></td></tr>';
@@ -174,14 +273,37 @@ function renderSales() {
 function updateSaleStatus(orderId, status) {
   const sales = getSales();
   const sale = sales.find(s => s.orderId === orderId);
-  if (sale) { sale.status = status; setStore('sales', sales); autoSyncSales(); }
+  if (!sale) return;
+  const prev = sale.status;
+  sale.status = status;
+  setStore('sales', sales);
+  renderSales();
+  saveRemote('sales', [sale]);
+  // Cancelling an order puts its items back in stock
+  if (status === 'cancelled' && prev !== 'cancelled') restock(sale, +1);
+  if (prev === 'cancelled' && status !== 'cancelled') restock(sale, -1);
+}
+
+function restock(sale, dir) {
+  if (!Array.isArray(sale.lineItems) || !sale.lineItems.length) return;
+  const inv = getStore('inventory');
+  const changed = [];
+  sale.lineItems.forEach(l => {
+    const p = inv.find(i => i.id === l.id);
+    if (p) { p.stock = Math.max(0, (p.stock || 0) + dir * (l.qty || 0)); changed.push(p); }
+  });
+  if (!changed.length) return;
+  setStore('inventory', inv);
+  syncStorefront();
+  saveRemote('inventory', changed);
+  showAdminToast(dir > 0 ? '↩️ Items returned to stock' : '📦 Stock reduced again');
 }
 
 function deleteSale(orderId) {
-  if (!confirm('Delete this order record?')) return;
+  if (!confirm('Delete this order record? This removes it from Google Sheets too.')) return;
   setStore('sales', getSales().filter(s => s.orderId !== orderId));
   renderSales();
-  autoSyncSales();
+  deleteRemote('sales', [orderId]);
 }
 
 // ─── REPAIRS ───
@@ -193,9 +315,10 @@ function openDescModal(ticketId) {
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
   overlay.innerHTML = `
     <div style="background:#fff;border-radius:14px;padding:2rem;max-width:520px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2);position:relative">
-      <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ocean);margin-bottom:.5rem">${r.ticketId} · ${r.firstName} ${r.lastName}</div>
-      <div style="font-size:.8rem;color:var(--gray-mid);margin-bottom:1rem">${r.applianceType ? r.applianceType.charAt(0).toUpperCase()+r.applianceType.slice(1) : ''} ${r.brand ? '· '+r.brand : ''}</div>
-      <div style="font-size:.95rem;color:var(--navy);line-height:1.65;white-space:pre-wrap;background:var(--bg-soft);border-radius:8px;padding:1rem 1.25rem">${r.description || 'No description provided.'}</div>
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ocean);margin-bottom:.5rem">${esc(r.ticketId)} · ${esc(r.firstName)} ${esc(r.lastName)}</div>
+      <div style="font-size:.8rem;color:var(--gray-mid);margin-bottom:1rem">${typeTag(r.requestType)} <span style="text-transform:capitalize">${esc(r.applianceType)}</span> ${r.brand ? '· '+esc(r.brand) : ''}</div>
+      <div style="font-size:.85rem;color:var(--gray-dark);margin-bottom:.75rem">📍 ${esc(r.address)||'—'}<br>📞 <a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>${r.email ? ` · ✉️ <a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ''}</div>
+      <div style="font-size:.95rem;color:var(--navy);line-height:1.65;white-space:pre-wrap;background:var(--off-white);border-radius:8px;padding:1rem 1.25rem">${esc(r.description) || 'No description provided.'}</div>
       <button onclick="document.getElementById('descModalOverlay').remove()" style="margin-top:1.5rem;width:100%;padding:.75rem;background:var(--ocean);color:#fff;border:none;border-radius:8px;font-family:var(--font-body);font-size:.875rem;font-weight:600;cursor:pointer">Close</button>
     </div>`;
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
@@ -207,41 +330,40 @@ function renderRepairs() {
   const active = all.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled');
   const done   = all.filter(r => r.status === 'Completed' || r.status === 'Cancelled');
 
-  function repairRow(r) {
-    return `<tr>
-      <td><strong>${r.ticketId}</strong></td>
-      <td>${r.firstName} ${r.lastName}<br><small style="color:var(--gray-mid)">${r.email}</small></td>
-      <td>${r.phone}</td>
-      <td style="text-transform:capitalize">${r.applianceType}</td>
-      <td>${r.brand || '—'}</td>
-      <td style="max-width:160px;font-size:.78rem;color:var(--gray-mid);cursor:pointer" title="Double-click to read full description" ondblclick="openDescModal('${r.ticketId}')">${r.description?.substring(0,60)}${r.description?.length>60?'… <span style="color:var(--ocean);font-size:.7rem">dbl-click</span>':''}</td>
+  function repairRow(r, faded) {
+    const id = esc(r.ticketId);
+    const desc = r.description || '';
+    return `<tr${faded ? ' style="opacity:.6"' : ''}>
+      <td><strong>${id}</strong><br><small style="color:var(--gray-mid)">${formatDate(r.timestamp)}</small></td>
+      <td>${esc(r.firstName)} ${esc(r.lastName)}<br><small style="color:var(--gray-mid)">${esc(r.email)}</small></td>
+      <td><a href="tel:${esc(r.phone)}" style="color:inherit">${esc(r.phone)}</a></td>
+      <td style="text-transform:capitalize">${esc(r.applianceType)}</td>
+      <td>${esc(r.brand) || '—'}</td>
+      <td>${typeTag(r.requestType)}</td>
+      <td style="max-width:180px;font-size:.78rem;color:var(--gray-mid);cursor:pointer" title="Click to read the full request" onclick="openDescModal('${id}')">${esc(desc.substring(0,60))}${desc.length>60?'… <span style="color:var(--ocean);font-size:.7rem">more</span>':''}</td>
       <td>
-        <select onchange="updateRepairStatus('${r.ticketId}', this.value)" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .5rem;font-size:.78rem;font-family:var(--font-body)">
-          <option ${r.status==='New'?'selected':''}>New</option>
-          <option ${r.status==='Scheduled'?'selected':''}>Scheduled</option>
-          <option ${r.status==='In Progress'?'selected':''}>In Progress</option>
-          <option ${r.status==='Completed'?'selected':''}>Completed</option>
-          <option ${r.status==='Cancelled'?'selected':''}>Cancelled</option>
+        <select onchange="updateRepairStatus('${id}', this.value)" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .5rem;font-size:.78rem;font-family:var(--font-body)">
+          ${['New','Scheduled','In Progress','Completed','Cancelled'].map(st => `<option ${r.status===st?'selected':''}>${st}</option>`).join('')}
         </select>
       </td>
-      <td><button class="action-btn" onclick="deleteRepair('${r.ticketId}')" title="Delete">🗑️</button></td>
+      <td><button class="action-btn" onclick="deleteRepair('${id}')" title="Delete">🗑️</button></td>
     </tr>`;
   }
 
   const sectionHeader = (label, count, color) =>
-    `<tr><td colspan="8" style="background:${color};padding:.5rem 1rem;font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff">${label} (${count})</td></tr>`;
+    `<tr><td colspan="9" style="background:${color};padding:.5rem 1rem;font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff">${label} (${count})</td></tr>`;
 
   let html = '';
   if (active.length) {
     html += sectionHeader('🔔 Active', active.length, '#e67e22');
-    html += active.map(repairRow).join('');
+    html += active.map(r => repairRow(r, false)).join('');
   }
   if (done.length) {
     html += sectionHeader('✓ Completed / Cancelled', done.length, '#7f8c8d');
-    html += done.map(r => `<tr style="opacity:.6">${repairRow(r).replace('<tr>','')}`).join('');
+    html += done.map(r => repairRow(r, true)).join('');
   }
   if (!all.length) {
-    html = '<tr><td colspan="8" style="text-align:center;color:var(--gray-mid);padding:2rem">No repair requests yet.</td></tr>';
+    html = '<tr><td colspan="9" style="text-align:center;color:var(--gray-mid);padding:2rem">No repair requests yet.</td></tr>';
   }
   document.getElementById('repairsTbody').innerHTML = html;
 }
@@ -249,14 +371,18 @@ function renderRepairs() {
 function updateRepairStatus(ticketId, status) {
   const repairs = getRepairs();
   const r = repairs.find(r => r.ticketId === ticketId);
-  if (r) { r.status = status; setStore('repairs', repairs); autoSyncRepairs(); }
+  if (!r) return;
+  r.status = status;
+  setStore('repairs', repairs);
+  renderRepairs();
+  saveRemote('repairs', [r]);
 }
 
 function deleteRepair(ticketId) {
-  if (!confirm('Delete this repair request?')) return;
+  if (!confirm('Delete this repair request? This removes it from Google Sheets too.')) return;
   setStore('repairs', getRepairs().filter(r => r.ticketId !== ticketId));
   renderRepairs();
-  autoSyncRepairs();
+  deleteRemote('repairs', [ticketId]);
 }
 
 // ─── INVENTORY ───
@@ -270,22 +396,22 @@ function renderInventory() {
     const badge = isOut ? 'cancelled' : 'in-stock';
     const label = isOut ? 'Out of Stock' : 'In Stock';
     return `<tr style="${isOut ? 'opacity:.55' : ''}">
-      <td style="font-size:.72rem;color:var(--gray-mid)">${p.id}</td>
+      <td style="font-size:.72rem;color:var(--gray-mid)">${esc(p.id)}</td>
       <td>
-        <div style="font-weight:600;font-size:.875rem;color:var(--navy)">${p.name}</div>
-        <div style="font-size:.72rem;color:var(--gray-mid)">${p.brand}</div>
+        <div style="font-weight:600;font-size:.875rem;color:var(--navy)">${esc(p.name)}</div>
+        <div style="font-size:.72rem;color:var(--gray-mid)">${esc(p.brand)}</div>
       </td>
-      <td style="text-transform:capitalize;font-size:.82rem">${p.category}</td>
+      <td style="text-transform:capitalize;font-size:.82rem">${esc(p.category)}</td>
       <td>
         <div style="margin-bottom:.25rem">
-          <span id="condLabel_${p.id}" style="display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.65rem;font-weight:700;background:${(p.condition||'').startsWith('New')?'rgba(39,174,96,.15)':'rgba(52,152,219,.12)'};color:${(p.condition||'').startsWith('New')?'#27ae60':'#2980b9'}">${p.condition||'Used - Good'}</span>
+          <span id="condLabel_${p.id}" style="display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.65rem;font-weight:700;background:${(p.condition||'').startsWith('New')?'rgba(39,174,96,.15)':'rgba(52,152,219,.12)'};color:${(p.condition||'').startsWith('New')?'#27ae60':'#2980b9'}">${esc(p.condition||'Used - Good')}</span>
         </div>
         <select id="cond_${p.id}" onchange="const s=this;const lbl=document.getElementById('condLabel_'+s.dataset.pid);lbl.textContent=s.value;lbl.style.background=s.value.startsWith('New')?'rgba(39,174,96,.15)':'rgba(52,152,219,.12)';lbl.style.color=s.value.startsWith('New')?'#27ae60':'#2980b9'" data-pid="${p.id}" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .4rem;font-size:.72rem;font-family:var(--font-body);color:var(--navy);min-width:120px">
           ${['New','New (Open Box)','Used - Excellent','Used - Good','Used - Fair','For Parts'].map(c=>`<option value="${c}" ${(p.condition||'Used - Good')===c?'selected':''}>${c}</option>`).join('')}
         </select>
       </td>
       <td>
-        <input type="text" id="loc_${p.id}" value="${p.storageLocation||''}" placeholder="e.g. Unit A"
+        <input type="text" id="loc_${p.id}" value="${esc(p.storageLocation)}" placeholder="e.g. Unit A"
           style="width:110px;padding:.3rem .4rem;border:1px solid var(--gray-light);border-radius:6px;font-size:.78rem;font-family:var(--font-body);color:var(--navy)"/>
       </td>
       <td>
@@ -357,13 +483,16 @@ function saveInventoryRow(productId) {
       category: item.category, price: isNaN(newPrice) ? item.price : newPrice,
       stock: newQty, stockStatus: newQty <= 0 ? 'out' : 'in-stock' });
   }
-  const inv = getInventory(); // for toast name lookup
-  const item = inv.find(i => i.id === productId);
+  const record = saved.find(s => s.id === productId);
+  const locEl  = document.getElementById('loc_' + productId);
+  const condEl = document.getElementById('cond_' + productId);
+  if (record && locEl)  record.storageLocation = locEl.value.trim();
+  if (record && condEl) record.condition = condEl.value;
   setStore('inventory', saved);
   syncStorefront();
   renderInventory();
-  autoSyncInventory(); // auto-sync full inventory on individual row save
-  showAdminToast(`✅ ${item.name} updated`);
+  if (record) saveRemote('inventory', [record]);
+  showAdminToast(`✅ ${record ? record.name : 'Product'} updated`);
 }
 
 function saveAllInventory() {
@@ -405,7 +534,7 @@ function saveAllInventory() {
   setStore('inventory', saved);
   syncStorefront();
   renderInventory();
-  autoSyncInventory();
+  saveRemote('inventory', saved);
   showAdminToast('✅ All inventory saved!');
 }
 
@@ -413,10 +542,10 @@ function removeProduct(productId) {
   const inv  = getInventory();
   const item = inv.find(i => i.id === productId);
   if (!item || !confirm(`Remove "${item.name}" from inventory?`)) return;
-  setStore('inventory', inv.filter(i => i.id !== productId));
+  setStore('inventory', getStore('inventory').filter(i => i.id !== productId));
   syncStorefront();
   renderInventory();
-  autoSyncInventory();
+  deleteRemote('inventory', [productId]);
   showAdminToast(`🗑️ ${item.name} removed`);
 }
 
@@ -451,79 +580,54 @@ function submitNewProduct() {
     id: 'PROD-' + Date.now(), name, brand, category, price, stock, desc,
     stockStatus: stock <= 0 ? 'out' : 'in-stock',
     icon: icons[category] || '📦', badge: null, oldPrice: null, _custom: true, specs: {},
-    storageLocation, condition, model
+    storageLocation, condition, model, msrp, refPrice, imageUrl
   };
-  const inv = getInventory();
+  const inv = getStore('inventory');
   inv.push(newProduct);
   setStore('inventory', inv);
   syncStorefront();
-  autoSyncInventory(); // auto-sync on new product add
+  saveRemote('inventory', [newProduct]);
   renderInventory();
   hideAddProduct();
   showAdminToast(`✅ "${name}" added!`);
   renderDashboard();
 }
 
-// ─── GOOGLE SHEETS SYNC ───
-const SHEETS_WEBHOOK_DEFAULT = 'https://script.google.com/macros/s/AKfycbwTvfY5mJPha_m8HO5lN944sGKcC9Xobl0YlhiUw2vf2LGON4nO8gHOE-hYTP7hB3qm/exec';
-let SHEETS_URL = localStorage.getItem('oa_sheets_url') || SHEETS_WEBHOOK_DEFAULT;
-
-function updateSheetsStatus() {
+// ─── GOOGLE SHEETS SETTINGS ───
+function setSheetsState(state) {
+  sheetsState = state;
   const dot = document.querySelector('.sheets-dot');
-  if (SHEETS_URL) dot.classList.add('connected');
-  else dot.classList.remove('connected');
+  const label = document.getElementById('sheetsStatusLabel');
+  if (dot) {
+    dot.classList.toggle('connected', state === 'ok');
+    dot.classList.toggle('error', state === 'error' || state === 'nokey');
+  }
+  if (label) label.textContent = { ok: 'Sheets connected', error: 'Sheets offline', nokey: 'Staff key needed', idle: 'Google Sheets' }[state];
 }
 
-function saveSheetUrl() {
+function openSheetsModal() {
+  document.getElementById('sheetsUrlInput').value = SHEETS_URL;
+  document.getElementById('sheetsKeyInput').value = getAdminKey();
+  document.getElementById('sheetsModal').style.display = 'flex';
+}
+
+async function saveSheetUrl() {
   const url = document.getElementById('sheetsUrlInput').value.trim();
-  if (url) {
-    localStorage.setItem('oa_sheets_url', url);
-    SHEETS_URL = url;
-    updateSheetsStatus();
-    document.getElementById('sheetsModal').style.display = 'none';
-    showAdminToast('✅ Google Sheets connected!');
-  }
+  const key = document.getElementById('sheetsKeyInput').value.trim();
+  if (!url) return showAdminToast('⚠️ Enter the Apps Script URL');
+  localStorage.setItem('oa_sheets_url', url);
+  localStorage.setItem('oa_admin_key', key);
+  SHEETS_URL = url;
+  document.getElementById('sheetsModal').style.display = 'none';
+  await pullFromSheets();
 }
 
-async function logToSheetsAdmin(type, data) {
-  if (!SHEETS_URL) return;
-  try {
-    // Must use text/plain with no-cors — JSON content-type triggers preflight which Google blocks
-    await fetch(SHEETS_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ type, ...data })
-    });
-  } catch (e) { console.error('Sheets error:', e); }
-}
-
-async function syncToSheets() { syncAllToSheets(); }
-
-async function syncAllToSheets() {
-  if (!SHEETS_URL) {
-    document.getElementById('sheetsModal')?.style && (document.getElementById('sheetsModal').style.display = 'flex');
-    return;
-  }
-  const btn = document.getElementById('syncBtn');
-  if (btn) { btn.textContent = '⏳ Syncing…'; btn.disabled = true; }
-  showAdminToast('⏳ Syncing all data to Google Sheets…');
-
-  await logToSheetsAdmin('full_sync', {
-    sales:     getSales(),
-    repairs:   getRepairs(),
-    inventory: getInventory(),
-    syncedAt:  new Date().toISOString()
-  });
-
-  if (btn) { btn.textContent = '🔄 Sync All to Sheets'; btn.disabled = false; }
-  showAdminToast('✅ Inventory, Sales & Repairs synced!');
-}
-
-async function syncInventoryToSheets() {
-  await logToSheetsAdmin('inventory_full', { inventory: getInventory(), timestamp: new Date().toISOString() });
-  showAdminToast('✅ Inventory synced!');
-}
+// The old "sync" buttons now simply refresh from Sheets
+function syncAllToSheets()      { return pullFromSheets(); }
+function syncToSheets()         { return pullFromSheets(); }
+function syncSalesToSheets()    { return pullFromSheets(); }
+function syncRepairsToSheets()  { return pullFromSheets(); }
+function syncInventoryToSheets(){ return pullFromSheets(); }
 
 // ─── EXPORT CSV ───
 
@@ -538,21 +642,6 @@ function filterByDate(items, period) {
     if (period === 'year') return d.getFullYear()===now.getFullYear();
     return true;
   });
-}
-
-// ─── SYNC SALES/REPAIRS TO SHEETS ───
-async function syncSalesToSheets() {
-  if (!SHEETS_URL) return showAdminToast('⚠️ No Sheets URL configured');
-  showAdminToast('⏳ Syncing sales...');
-  await logToSheetsAdmin('full_sync', { sales: getSales(), syncedAt: new Date().toISOString() });
-  showAdminToast('✅ Sales synced to Google Sheets!');
-}
-
-async function syncRepairsToSheets() {
-  if (!SHEETS_URL) return showAdminToast('⚠️ No Sheets URL configured');
-  showAdminToast('⏳ Syncing repairs...');
-  await logToSheetsAdmin('full_sync', { repairs: getRepairs(), syncedAt: new Date().toISOString() });
-  showAdminToast('✅ Repair requests synced!');
 }
 
 // ─── REPAIR REVENUE ───
@@ -578,6 +667,7 @@ function saveRepairRevenue() {
   const arr = getRepairRevenue();
   arr.unshift({ id: 'RR-'+Date.now(), date, desc, customer, amount, notes, timestamp: new Date().toISOString() });
   setRepairRevenue(arr);
+  saveRemote('repairRevenue', [arr[0]]);
   document.getElementById('repairRevModal').style.display = 'none';
   renderLedger();
   showAdminToast('✅ Repair revenue added!');
@@ -587,6 +677,7 @@ function deleteRepairRevenue(id) {
   if (!confirm('Delete this entry?')) return;
   setRepairRevenue(getRepairRevenue().filter(r => r.id !== id));
   renderLedger();
+  deleteRemote('repairRevenue', [id]);
 }
 
 function switchLedgerTab(tab) {
@@ -611,13 +702,13 @@ function generateRepairInvoice(id) {
       </div>
       <div style="text-align:right">
         <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#1a7fc1">Repair Invoice</div>
-        <div style="font-size:1.3rem;font-weight:700;color:#1a2e44">${invNum}</div>
-        <div style="font-size:.8rem;color:#666;margin-top:.25rem">Date: ${r.date}</div>
+        <div style="font-size:1.3rem;font-weight:700;color:#1a2e44">${esc(invNum)}</div>
+        <div style="font-size:.8rem;color:#666;margin-top:.25rem">Date: ${esc(r.date)}</div>
       </div>
     </div>
     <div style="margin-bottom:2rem">
       <div style="font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-bottom:.4rem">Bill To</div>
-      <div style="font-weight:600;color:#1a2e44">${r.customer || 'Customer'}</div>
+      <div style="font-weight:600;color:#1a2e44">${esc(r.customer||'Customer')}</div>
     </div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:1.5rem">
       <thead><tr style="background:#f8f9fa">
@@ -625,8 +716,8 @@ function generateRepairInvoice(id) {
         <th style="text-align:right;padding:.6rem .8rem;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:#666;border-bottom:2px solid #eee">Amount</th>
       </tr></thead>
       <tbody>
-        <tr><td style="padding:.7rem .8rem;font-size:.88rem;color:#333">${r.desc}</td><td style="padding:.7rem .8rem;font-size:.88rem;text-align:right;color:#333">$${r.amount.toFixed(2)}</td></tr>
-        ${r.notes ? '<tr><td colspan="2" style="padding:.5rem .8rem;font-size:.78rem;color:#888;font-style:italic">'+r.notes+'</td></tr>' : ''}
+        <tr><td style="padding:.7rem .8rem;font-size:.88rem;color:#333">${esc(r.desc)}</td><td style="padding:.7rem .8rem;font-size:.88rem;text-align:right;color:#333">$${r.amount.toFixed(2)}</td></tr>
+        ${r.notes ? '<tr><td colspan="2" style="padding:.5rem .8rem;font-size:.78rem;color:#888;font-style:italic">'+esc(r.notes)+'</td></tr>' : ''}
       </tbody>
     </table>
     <div style="display:flex;justify-content:flex-end">
@@ -645,7 +736,7 @@ function renderLedger() {
   const sales      = filterByDate(getSales(), period).sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
   const repairRevs = filterByDate(getRepairRevenue().map(r => ({...r, timestamp: r.timestamp||r.date+'T00:00:00'})), period)
                        .sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
-  const salesRev  = sales.reduce((s, o) => s + (o.total||0), 0);
+  const salesRev  = sales.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (o.total||0), 0);
   const repairRev = repairRevs.reduce((s, r) => s + (r.amount||0), 0);
   document.getElementById('ledger-revenue').textContent    = '$' + salesRev.toLocaleString('en-US',{minimumFractionDigits:2});
   document.getElementById('ledger-repair-rev').textContent = '$' + repairRev.toLocaleString('en-US',{minimumFractionDigits:2});
@@ -656,21 +747,21 @@ function renderLedger() {
     const statusColor = s.status==='completed'?'#27ae60':s.status==='cancelled'?'#c0392b':'#e67e22';
     return `<tr>
       <td style="font-size:.78rem">${formatDate(s.timestamp)}</td>
-      <td><strong>${s.orderId}</strong></td>
-      <td style="font-size:.82rem">${s.firstName||''} ${s.lastName||''}<br><small style="color:var(--gray-mid)">${s.email||''}</small></td>
-      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem" title="${s.items}">${s.items||''}</td>
+      <td><strong>${esc(s.orderId)}</strong></td>
+      <td style="font-size:.82rem">${esc(s.firstName||'')} ${esc(s.lastName||'')}<br><small style="color:var(--gray-mid)">${esc(s.email||'')}</small></td>
+      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem" title="${esc(s.items)}">${esc(s.items||'')}</td>
       <td><strong>$${(s.total||0).toLocaleString('en-US',{minimumFractionDigits:2})}</strong></td>
       <td style="font-size:.78rem">${fulfillLabel(s.fulfillment)}</td>
-      <td><span style="padding:.2rem .5rem;border-radius:5px;font-size:.7rem;font-weight:700;color:#fff;background:${statusColor}">${s.status||'pending'}</span></td>
-      <td><button onclick="generateInvoice('${s.orderId}')" style="padding:.3rem .6rem;background:var(--ocean);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.72rem;font-family:var(--font-body)">🧾 Invoice</button></td>
+      <td><span style="padding:.2rem .5rem;border-radius:5px;font-size:.7rem;font-weight:700;color:#fff;background:${statusColor}">${esc(s.status||'pending')}</span></td>
+      <td><button onclick="generateInvoice('${esc(s.orderId)}')" style="padding:.3rem .6rem;background:var(--ocean);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.72rem;font-family:var(--font-body)">🧾 Invoice</button></td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--gray-mid);padding:2rem">No sales in this period.</td></tr>';
   document.getElementById('repairRevTbody').innerHTML = repairRevs.map(r => `<tr>
-    <td style="font-size:.78rem">${r.date||''}</td>
-    <td style="font-size:.82rem">${r.desc||''}</td>
-    <td style="font-size:.82rem">${r.customer||'—'}</td>
+    <td style="font-size:.78rem">${esc(r.date||'')}</td>
+    <td style="font-size:.82rem">${esc(r.desc||'')}</td>
+    <td style="font-size:.82rem">${esc(r.customer||'—')}</td>
     <td><strong>$${(r.amount||0).toFixed(2)}</strong></td>
-    <td style="font-size:.78rem;color:var(--gray-mid)">${r.notes||'—'}</td>
+    <td style="font-size:.78rem;color:var(--gray-mid)">${esc(r.notes||'—')}</td>
     <td><button onclick="generateRepairInvoice('${r.id}')" style="padding:.3rem .6rem;background:var(--ocean);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.72rem;font-family:var(--font-body)">🧾 Invoice</button></td>
     <td><button onclick="deleteRepairRevenue('${r.id}')" style="background:none;border:none;cursor:pointer;color:var(--gray-mid);font-size:.9rem">🗑️</button></td>
   </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--gray-mid);padding:2rem">No repair revenue yet.<br><small>Click "+ Add Repair Revenue" to log a completed service.</small></td></tr>';
@@ -682,11 +773,11 @@ function exportLedgerCSV() {
   const rows   = [['Date','Order ID','Customer','Email','Items','Subtotal','Tax','Delivery','Total','Type','Status']];
   sales.forEach(s => {
     const sub = Math.max(0,(s.total||0)-(s.tax||0)-(s.deliveryFee||0));
-    rows.push([formatDate(s.timestamp), s.orderId, `${s.firstName||''} ${s.lastName||''}`, s.email||'',
-      `"${s.items||''}"`, sub.toFixed(2), (s.tax||0).toFixed(2), (s.deliveryFee||0).toFixed(2),
+    rows.push([formatDate(s.timestamp), s.orderId, `${esc(s.firstName||'')} ${esc(s.lastName||'')}`, s.email||'',
+      `"${esc(s.items||'')}"`, sub.toFixed(2), (s.tax||0).toFixed(2), (s.deliveryFee||0).toFixed(2),
       (s.total||0).toFixed(2), s.fulfillment||'pickup', s.status||'pending']);
   });
-  const csv = rows.map(r => r.join(',')).join('\n');
+  const csv = rows.map(r => r.map(csvCell).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   a.download = `ledger-${new Date().toISOString().slice(0,10)}.csv`;
@@ -697,7 +788,9 @@ function generateInvoice(orderId) {
   const s = getSales().find(s => s.orderId === orderId);
   if (!s) return;
   const subtotal  = Math.max(0,(s.total||0)-(s.tax||0)-(s.deliveryFee||0));
-  const lineItems = (s.items||'').split(',').map(i => i.trim()).filter(Boolean);
+  const lineItems = Array.isArray(s.lineItems) && s.lineItems.length
+    ? s.lineItems.map(l => ({ text: `${l.name} × ${l.qty}`, amount: (l.price||0) * (l.qty||0) }))
+    : (s.items||'').split(/\s*\|\s*|,\s*/).filter(Boolean).map(t => ({ text: t, amount: null }));
   const invNum    = orderId.replace('ORD-','INV-');
   document.getElementById('invoiceContent').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2.5rem;padding-bottom:1.5rem;border-bottom:2px solid #eee">
@@ -708,24 +801,24 @@ function generateInvoice(orderId) {
       </div>
       <div style="text-align:right">
         <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#1a7fc1">Invoice</div>
-        <div style="font-size:1.3rem;font-weight:700;color:#1a2e44">${invNum}</div>
+        <div style="font-size:1.3rem;font-weight:700;color:#1a2e44">${esc(invNum)}</div>
         <div style="font-size:.8rem;color:#666;margin-top:.25rem">Date: ${formatDate(s.timestamp)}</div>
-        <div style="margin-top:.5rem;padding:.3rem .7rem;background:${s.status==='completed'?'#27ae60':s.status==='cancelled'?'#c0392b':'#e67e22'};color:#fff;border-radius:5px;font-size:.72rem;font-weight:700;text-transform:uppercase;display:inline-block">${s.status||'pending'}</div>
+        <div style="margin-top:.5rem;padding:.3rem .7rem;background:${s.status==='completed'?'#27ae60':s.status==='cancelled'?'#c0392b':'#e67e22'};color:#fff;border-radius:5px;font-size:.72rem;font-weight:700;text-transform:uppercase;display:inline-block">${esc(s.status||'pending')}</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:2rem">
       <div>
         <div style="font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-bottom:.4rem">Bill To</div>
-        <div style="font-weight:600;color:#1a2e44">${s.firstName||''} ${s.lastName||''}</div>
-        <div style="font-size:.85rem;color:#555">${s.email||''}</div>
-        <div style="font-size:.85rem;color:#555">${s.phone||''}</div>
-        ${s.address?`<div style="font-size:.85rem;color:#555">${s.address}</div>`:''}
+        <div style="font-weight:600;color:#1a2e44">${esc(s.firstName||'')} ${esc(s.lastName||'')}</div>
+        <div style="font-size:.85rem;color:#555">${esc(s.email||'')}</div>
+        <div style="font-size:.85rem;color:#555">${esc(s.phone||'')}</div>
+        ${s.address?`<div style="font-size:.85rem;color:#555">${esc(s.address)}</div>`:''}
       </div>
       <div>
         <div style="font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-bottom:.4rem">Fulfillment</div>
         <div style="font-weight:600;color:#1a2e44">${s.fulfillment==='delivery'?'🚚 Delivery & Installation':'🏪 Store Pickup'}</div>
         <div style="font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-top:.75rem;margin-bottom:.4rem">Order Reference</div>
-        <div style="font-size:.82rem;color:#1a7fc1;font-weight:600">${s.orderId}</div>
+        <div style="font-size:.82rem;color:#1a7fc1;font-weight:600">${esc(s.orderId)}</div>
       </div>
     </div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:1.5rem">
@@ -734,15 +827,15 @@ function generateInvoice(orderId) {
         <th style="text-align:right;padding:.6rem .8rem;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:#666;border-bottom:2px solid #eee">Amount</th>
       </tr></thead>
       <tbody>
-        ${lineItems.map(item=>`<tr><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;color:#333">${item}</td><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;text-align:right;color:#333">—</td></tr>`).join('')}
-        ${s.fulfillment==='delivery'?`<tr><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;color:#333">Delivery & Installation</td><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;text-align:right;color:#333">$${(s.deliveryFee||145).toFixed(2)}</td></tr>`:''}
+        ${lineItems.map(item=>`<tr><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;color:#333">${esc(item.text)}</td><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;text-align:right;color:#333">${item.amount === null ? '—' : '$' + item.amount.toFixed(2)}</td></tr>`).join('')}
+        ${s.fulfillment==='delivery'&&s.deliveryFee>0?`<tr><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;color:#333">Delivery & Installation</td><td style="padding:.7rem .8rem;font-size:.88rem;border-bottom:1px solid #f0f0f0;text-align:right;color:#333">$${(s.deliveryFee||0).toFixed(2)}</td></tr>`:''}
       </tbody>
     </table>
     <div style="display:flex;justify-content:flex-end">
       <div style="width:260px">
         <div style="display:flex;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid #eee;font-size:.88rem"><span style="color:#666">Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid #eee;font-size:.88rem"><span style="color:#666">Tax (8.25%)</span><span>$${(s.tax||0).toFixed(2)}</span></div>
-        ${s.fulfillment==='delivery'?`<div style="display:flex;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid #eee;font-size:.88rem"><span style="color:#666">Delivery & Installation</span><span>$${(s.deliveryFee||145).toFixed(2)}</span></div>`:''}
+        ${s.fulfillment==='delivery'&&s.deliveryFee>0?`<div style="display:flex;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid #eee;font-size:.88rem"><span style="color:#666">Delivery & Installation</span><span>$${(s.deliveryFee||0).toFixed(2)}</span></div>`:''}
         <div style="display:flex;justify-content:space-between;padding:.75rem 0;font-size:1.05rem;font-weight:700;color:#1a2e44"><span>Total</span><span>$${(s.total||0).toFixed(2)}</span></div>
       </div>
     </div>
@@ -752,23 +845,28 @@ function generateInvoice(orderId) {
   document.getElementById('invoiceOverlay').style.display = 'flex';
 }
 
+function csvCell(v) {
+  const t = String(v ?? '');
+  return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+
 function exportCSV(type) {
   let rows = [], headers = [], filename = '';
   if (type === 'sales') {
-    headers = ['Order ID', 'Items', 'Total', 'Date', 'Status'];
-    rows = getSales().map(s => [s.orderId, `"${s.items}"`, s.total, s.timestamp, s.status]);
+    headers = ['Order ID', 'Customer', 'Phone', 'Email', 'Items', 'Total', 'Date', 'Status'];
+    rows = getSales().map(s => [s.orderId, `${s.firstName||''} ${s.lastName||''}`, s.phone, s.email, s.items, s.total, s.timestamp, s.status]);
     filename = 'sales_export.csv';
   } else if (type === 'repairs') {
-    headers = ['Ticket ID', 'First Name', 'Last Name', 'Phone', 'Email', 'Address', 'Appliance', 'Brand', 'Urgency', 'Description', 'Date', 'Status'];
-    rows = getRepairs().map(r => [r.ticketId, r.firstName, r.lastName, r.phone, r.email, `"${r.address}"`, r.applianceType, r.brand, `"${r.description}"`, r.timestamp, r.status]);
+    headers = ['Ticket ID', 'Type', 'First Name', 'Last Name', 'Phone', 'Email', 'Address', 'Appliance', 'Brand', 'Description', 'Date', 'Status'];
+    rows = getRepairs().map(r => [r.ticketId, r.requestType || 'Repair', r.firstName, r.lastName, r.phone, r.email, r.address, r.applianceType, r.brand, r.description, r.timestamp, r.status]);
     filename = 'repair_requests_export.csv';
   } else if (type === 'inventory') {
-    headers = ['ID', 'Product', 'Brand', 'Category', 'Price', 'Stock', 'Status'];
-    rows = getInventory().map(i => [i.id, `"${i.name}"`, i.brand, i.category, i.price, i.stock, i.stockStatus]);
+    headers = ['ID', 'Product', 'Brand', 'Category', 'Condition', 'Price', 'Stock', 'Location'];
+    rows = getInventory().map(i => [i.id, i.name, i.brand, i.category, i.condition, i.price, i.stock, i.storageLocation]);
     filename = 'inventory_export.csv';
   }
 
-  const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+  const csv = [headers, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -802,7 +900,6 @@ function showAdminToast(msg) {
 // ─── INIT ───
 document.addEventListener('DOMContentLoaded', () => {
   renderDashboard();
-  updateSheetsStatus();
 
   // Sidebar navigation
   document.querySelectorAll('.sidebar-link[data-tab]').forEach(link => {
@@ -812,16 +909,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Sheets status click
-  document.getElementById('sheetsStatus')?.addEventListener('click', () => {
-    document.getElementById('sheetsModal').style.display = 'flex';
-  });
+  document.getElementById('sheetsStatus')?.addEventListener('click', openSheetsModal);
 
-  // Load saved sheets URL
-  const savedUrl = localStorage.getItem('oa_sheets_url');
-  if (savedUrl) {
-    SHEETS_URL = savedUrl;
-    document.getElementById('sheetsUrlInput').value = savedUrl;
-    updateSheetsStatus();
+  if (!getAdminKey()) {
+    setSheetsState('nokey');
+    openSheetsModal();
+  } else {
+    pullFromSheets({ silent: true });
   }
+
+  // Pick up new customer orders/requests while the panel is open
+  // (skipped on the Inventory tab so it never overwrites unsaved edits)
+  setInterval(() => {
+    const active = document.querySelector('.sidebar-link.active')?.dataset.tab;
+    if (document.visibilityState === 'visible' && active !== 'inventory' && getAdminKey()) pullFromSheets({ silent: true });
+  }, 60000);
 });

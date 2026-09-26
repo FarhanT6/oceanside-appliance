@@ -1,333 +1,558 @@
 // ============================================================
-//   OCEANSIDE APPLIANCE — GOOGLE APPS SCRIPT
-//   Supports two-way sync:
-//   • Website/Admin → Sheets (POST)
-//   • Sheets → Website (GET)
+//   OCEANSIDE APPLIANCE — GOOGLE APPS SCRIPT (v2)
+//   Google Sheets is the single source of truth for the website
+//   and the staff panel.
 //
-//   SETUP:
-//   1. Extensions → Apps Script → paste this file
-//   2. Run initialSetup() once manually
-//   3. Deploy → New Deployment → Web App
-//      Execute as: Me  |  Access: Anyone
-//   4. Copy URL → paste in js/main.js line 4
+//   PUBLIC (no key needed — used by the website):
+//     GET  ?action=products        → in-stock + sold-out catalog (public fields only)
+//     POST {type:'order'}          → places an order request, checks + decrements stock
+//     POST {type:'repair_request'} → logs a repair / sell-to-us request
+//     POST {type:'view_request'}   → logs a "view in person" request
 //
-//   RE-DEPLOYING AFTER CODE CHANGES:
-//   → Deploy → Manage Deployments → Edit (pencil)
-//   → Version: "New version" → Save
-//   The URL stays the same! You never need to recopy it.
+//   STAFF ONLY (requires the admin key):
+//     POST {type:'admin_pull', key}                         → everything
+//     POST {type:'admin_upsert', key, collection, records}  → add / update rows
+//     POST {type:'admin_delete', key, collection, ids}      → remove rows
+//
+//   SETUP / UPDATING — see README.md → "Google Sheets setup"
+//   1. Extensions → Apps Script → replace everything with this file → Save
+//   2. Run setupAdminKey() once (▶ Run). Copy the key it shows you.
+//   3. Deploy → Manage deployments → ✏️ Edit → Version: "New version" → Deploy
+//      (the URL stays the same)
+//   4. In the staff panel click the Sheets status pill and paste the key.
 // ============================================================
 
-const SHEET_NAMES = {
-  sales:     'Sales',
-  repairs:   'Repair Requests',
-  inventory: 'Inventory',
-  log:       'Activity Log',
-  views:     'Viewing Requests'
+const NOTIFY_EMAIL      = 'oceansideappliance96@gmail.com'; // owner alerts go here
+const SEND_OWNER_EMAILS = true;
+const TAX_RATE          = 0.0825; // Oceanside, CA
+
+// Column flags
+const RO  = 1; // read-only in the sheet (display only; the hidden _data column wins)
+const NUM = 2;
+const INT = 4;
+
+// Each collection = one tab. Columns the owner edits directly in Sheets
+// (anything not RO) are read back and override the stored record.
+const COLLECTIONS = {
+  inventory: {
+    sheet: 'Inventory', idKey: 'id',
+    cols: [
+      ['Product ID', 'id', RO], ['Product Name', 'name'], ['Brand', 'brand'],
+      ['Category', 'category'], ['Condition', 'condition'], ['Model', 'model'],
+      ['Our Price ($)', 'price', NUM], ['MSRP ($)', 'msrp', NUM], ['Competitor Price ($)', 'refPrice', NUM],
+      ['Stock Qty', 'stock', INT], ['Storage Location', 'storageLocation'],
+      ['Image URL(s)', 'imageUrl'], ['Description', 'desc'], ['Last Updated', 'updatedAt', RO]
+    ],
+    legacy: {
+      'Product ID': 'id', 'Product Name': 'name', 'Brand / Manufacturer': 'brand', 'Brand': 'brand',
+      'Category (appliance type)': 'category', 'Category': 'category',
+      'Condition (New/Used/etc)': 'condition', 'Our Price ($)': 'price', 'Price ($)': 'price',
+      'MSRP / Retail Price ($)': 'msrp', 'Competitor Price ($)': 'refPrice', 'Stock Qty': 'stock',
+      'Storage Location': 'storageLocation', 'Image URL(s)': 'imageUrl'
+    }
+  },
+  sales: {
+    sheet: 'Sales', idKey: 'orderId', newestFirst: true,
+    cols: [
+      ['Order ID', 'orderId', RO], ['Date', 'timestamp', RO], ['Status', 'status'],
+      ['First Name', 'firstName'], ['Last Name', 'lastName'], ['Phone', 'phone'], ['Email', 'email'],
+      ['Items', 'items', RO], ['Item Count', 'itemCount', RO | INT],
+      ['Subtotal ($)', 'subtotal', NUM], ['Tax ($)', 'tax', NUM], ['Delivery Fee ($)', 'deliveryFee', NUM],
+      ['Total ($)', 'total', NUM], ['Fulfillment', 'fulfillment'], ['Address', 'address'],
+      ['Availability', 'availability'], ['Customer Notes', 'notes'], ['Internal Notes', 'internalNotes']
+    ],
+    legacy: {
+      'Order ID': 'orderId', 'Customer Full Name': '_fullName', 'Customer Email': 'email',
+      'Customer Phone': 'phone', 'Items Ordered': 'items', 'Item Count': 'itemCount',
+      'Subtotal ($)': 'subtotal', 'Tax ($)': 'tax', 'Delivery Fee ($)': 'deliveryFee',
+      'Total Charged ($)': 'total', 'Fulfillment Type (pickup/view/delivery)': 'fulfillment',
+      'Date': '_date', 'Time': '_time', 'Order Status': 'status'
+    }
+  },
+  repairs: {
+    sheet: 'Repair Requests', idKey: 'ticketId', newestFirst: true,
+    cols: [
+      ['Ticket ID', 'ticketId', RO], ['Date', 'timestamp', RO], ['Status', 'status'],
+      ['Request Type', 'requestType'], ['First Name', 'firstName'], ['Last Name', 'lastName'],
+      ['Phone', 'phone'], ['Email', 'email'], ['Address', 'address'],
+      ['Appliance', 'applianceType'], ['Brand', 'brand'], ['Description', 'description'],
+      ['Assigned To', 'assignedTo'], ['Internal Notes', 'internalNotes']
+    ],
+    legacy: {
+      'Ticket ID': 'ticketId', 'First Name': 'firstName', 'Last Name': 'lastName', 'Phone': 'phone',
+      'Email': 'email', 'Address': 'address', 'Service Address': 'address',
+      'Appliance': 'applianceType', 'Appliance Type': 'applianceType',
+      'Brand': 'brand', 'Appliance Brand': 'brand',
+      'Description': 'description', 'Issue Description': 'description',
+      'Date Submitted': '_dateSubmitted', 'Status': 'status',
+      'Status (New/Scheduled/In Progress/Completed)': 'status',
+      'Assigned To': 'assignedTo', 'Assigned Technician': 'assignedTo',
+      'Notes': 'internalNotes', 'Internal Notes': 'internalNotes'
+    }
+  },
+  views: {
+    sheet: 'Viewing Requests', idKey: 'requestId', newestFirst: true,
+    cols: [
+      ['Request ID', 'requestId', RO], ['Date', 'timestamp', RO], ['Status', 'status'],
+      ['Name', 'name'], ['Phone', 'phone'], ['Email', 'email'],
+      ['Appliance', 'appliance'], ['Brand', 'brand'], ['Price ($)', 'price', NUM],
+      ['Preferred Time', 'preferredTime'], ['Product ID', 'productId', RO]
+    ],
+    legacy: {
+      'Timestamp': 'timestamp', 'Name': 'name', 'Phone': 'phone', 'Email': 'email',
+      'Appliance': 'appliance', 'Brand': 'brand', 'Price ($)': 'price',
+      'Preferred Contact Time': 'preferredTime', 'Status': 'status'
+    }
+  },
+  repairRevenue: {
+    sheet: 'Repair Revenue', idKey: 'id', newestFirst: true,
+    cols: [
+      ['Entry ID', 'id', RO], ['Date', 'date'], ['Description', 'desc'],
+      ['Customer', 'customer'], ['Amount ($)', 'amount', NUM], ['Notes', 'notes']
+    ],
+    legacy: {}
+  }
 };
 
-// ─── GET: Website fetches products / inventory from Sheets ───
+const PUBLIC_PRODUCT_FIELDS = ['id', 'name', 'brand', 'category', 'condition', 'model', 'price', 'msrp',
+  'refPrice', 'stock', 'imageUrl', 'desc', 'specs', 'badge', 'badgeText', 'oldPrice'];
+
+// ─── GET ───
 function doGet(e) {
-  const action = e?.parameter?.action || '';
-
-  if (action === 'getProducts') {
-    // Return inventory data so website can sync stock levels
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_NAMES.inventory);
-    if (!sheet) return jsonResponse({ products: [] });
-
-    const rows = sheet.getDataRange().getValues();
-    if (rows.length < 2) return jsonResponse({ products: [] });
-
-    const headers  = rows[0];
-    const idCol    = headers.indexOf('Product ID');
-    const nameCol  = headers.indexOf('Product Name');
-    const priceCol = headers.indexOf('Price ($)');
-    const stockCol = headers.indexOf('Stock Qty');
-    const catCol   = headers.indexOf('Category');
-    const brandCol = headers.indexOf('Brand');
-    const customCol= headers.indexOf('Custom');
-
-    const locCol   = headers.indexOf('Storage Location');
-
-    const products = rows.slice(1).map(row => ({
-      id:       row[idCol]    || '',
-      name:     row[nameCol]  || '',
-      price:    parseFloat(row[priceCol]) || 0,
-      stock:    parseInt(row[stockCol])   || 0,
-      category: row[catCol]   || '',
-      brand:    row[brandCol] || '',
-      _custom:  row[customCol] === true || row[customCol] === 'TRUE',
-      storageLocation: locCol >= 0 ? (row[locCol] || '') : ''
-    })).filter(p => p.id);
-
-    return jsonResponse({ products });
+  const action = (e && e.parameter && e.parameter.action) || '';
+  if (action === 'products' || action === 'getProducts') {
+    const products = readCollection('inventory').map(p => {
+      const out = {};
+      PUBLIC_PRODUCT_FIELDS.forEach(k => { if (p[k] !== undefined && p[k] !== '') out[k] = p[k]; });
+      return out;
+    });
+    return jsonResponse({ success: true, products: products });
   }
-
-  // Health check
-  return jsonResponse({ status: 'ok', app: 'Oceanside Appliance' });
+  return jsonResponse({ status: 'ok', app: 'Oceanside Appliance', version: 2 });
 }
 
-// ─── POST: Website/Admin sends data to Sheets ───
+// ─── POST ───
 function doPost(e) {
+  let data;
   try {
-    // Accept text/plain (sent by browser no-cors) and application/json
-    const raw  = e.postData ? e.postData.contents : '{}';
-    const data = JSON.parse(raw);
-    const type = data.type;
-    const ss   = SpreadsheetApp.getActiveSpreadsheet();
-
-    if (type === 'completed_sale')      logSale(ss, data);
-    else if (type === 'repair_request') logRepair(ss, data);
-    else if (type === 'inventory_update') updateInventoryRow(ss, data);
-    else if (type === 'inventory_full')   writeFullInventory(ss, data.inventory);
-    else if (type === 'add_product')      addProductToInventory(ss, data);
-    else if (type === 'view_request')  logViewRequest(ss, data);
-    else if (type === 'full_sync') {
-      if (data.sales)     writeAllSales(ss, data.sales);
-      if (data.repairs)   writeAllRepairs(ss, data.repairs);
-      if (data.inventory) writeFullInventory(ss, data.inventory);
-    }
-
-    appendLog(ss, type, data);
-    return jsonResponse({ success: true });
-
+    data = JSON.parse((e && e.postData && e.postData.contents) || '{}');
   } catch (err) {
-    return jsonResponse({ success: false, error: err.toString() });
+    return jsonResponse({ success: false, error: 'Bad request' });
   }
-}
+  const type = data.type;
 
-// ─── SALES ───
-function logSale(ss, data) {
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.sales, salesHeaders());
-  const dt = new Date(data.timestamp || new Date());
-  sheet.appendRow([
-    data.orderId || ('ORD-'+Date.now()),
-    (data.firstName||'') + ' ' + (data.lastName||''),
-    data.email   || '',
-    data.phone   || '',
-    data.items   || '',
-    data.itemCount || 1,
-    data.subtotal || 0,
-    data.tax      || 0,
-    data.deliveryFee || 0,
-    data.total    || 0,
-    data.fulfillment || 'pickup',
-    formatDate(dt), formatTime(dt),
-    data.status  || 'pending'
-  ]);
-  formatLastRow(sheet, '#E8F5E9');
-}
+  try {
+    // Public, customer-facing requests
+    if (type === 'order' || type === 'completed_sale') return jsonResponse(withLock(() => placeOrder(data)));
+    if (type === 'repair_request') return jsonResponse(withLock(() => logRepair(data)));
+    if (type === 'view_request')   return jsonResponse(withLock(() => logViewRequest(data)));
 
-function writeAllSales(ss, sales) {
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.sales, salesHeaders());
-  sheet.clear(); // clears both content AND formatting
-  const hdrs = salesHeaders();
-  const hdrRange = sheet.getRange(1, 1, 1, hdrs.length);
-  hdrRange.setValues([hdrs]);
-  hdrRange.setBackground('#1a2e44');
-  hdrRange.setFontColor('#ffffff');
-  hdrRange.setFontWeight('bold');
-  hdrRange.setFontSize(10);
-  sheet.setFrozenRows(1);
-  sheet.setColumnWidths(1, hdrs.length, 150);
-  sales.forEach(data => {
-    const dt = new Date(data.timestamp || new Date());
-    sheet.appendRow([
-      data.orderId,
-      (data.firstName||'') + ' ' + (data.lastName||''),
-      data.email||'', data.phone||'',
-      ''+data.items, data.itemCount||1,
-      data.subtotal||0, data.tax||0, data.deliveryFee||0, data.total||0,
-      data.fulfillment||'pickup',
-      formatDate(dt), formatTime(dt), data.status||'pending'
-    ]);
-  });
-}
-
-// ─── REPAIRS ───
-function logRepair(ss, data) {
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.repairs,
-    ['Ticket ID','First Name','Last Name','Phone','Email','Address','Appliance','Brand','Description','Date Submitted','Status','Assigned To','Notes']);
-  const dt = new Date(data.timestamp || new Date());
-  sheet.appendRow([
-    data.ticketId||('TKT-'+Date.now()),
-    data.firstName||'', data.lastName||'', data.phone||'', data.email||'', data.address||'',
-    data.applianceType||'', data.brand||'', data.description||'',
-    formatDate(dt)+' '+formatTime(dt), data.status||'New', '', ''
-  ]);
-  formatLastRow(sheet, '#F3F8FF');
-}
-
-function writeAllRepairs(ss, repairs) {
-  const repairHeaders = ['Ticket ID','First Name','Last Name','Phone','Email','Service Address','Appliance Type','Appliance Brand','Issue Description','Date Submitted','Status (New/Scheduled/In Progress/Completed)','Assigned Technician','Internal Notes'];
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.repairs, repairHeaders);
-  sheet.clear(); // clears both content AND formatting
-  const hdrRange = sheet.getRange(1, 1, 1, repairHeaders.length);
-  hdrRange.setValues([repairHeaders]);
-  hdrRange.setBackground('#1a2e44');
-  hdrRange.setFontColor('#ffffff');
-  hdrRange.setFontWeight('bold');
-  hdrRange.setFontSize(10);
-  sheet.setFrozenRows(1);
-  sheet.setColumnWidths(1, repairHeaders.length, 150);
-  repairs.forEach(r => {
-    const dt = new Date(r.timestamp||new Date());
-    sheet.appendRow([r.ticketId,r.firstName,r.lastName,r.phone,r.email,r.address,
-      r.applianceType,r.brand,r.description,formatDate(dt)+' '+formatTime(dt),r.status||'New','','']);
-  });
-}
-
-// ─── INVENTORY ───
-function updateInventoryRow(ss, data) {
-  const sheet  = getOrCreateSheet(ss, SHEET_NAMES.inventory, inventoryHeaders());
-  const values = sheet.getDataRange().getValues();
-  const idCol  = values[0].indexOf('Product ID');
-  for (let i = 1; i < values.length; i++) {
-    if (values[i][idCol] === data.productId) {
-      const curStock = parseInt(values[i][5]) || 0;
-      const newStock = Math.max(0, curStock + (parseInt(data.qtyChange) || 0));
-      const status   = newStock <= 0 ? 'Out of Stock' : 'In Stock';
-      sheet.getRange(i+1, 6).setValue(newStock);
-      sheet.getRange(i+1, 7).setValue(status);
-      if (data.storageLocation !== undefined) sheet.getRange(i+1, 8).setValue(data.storageLocation);
-      if (data.price !== undefined) sheet.getRange(i+1, 5).setValue(data.price);
-      sheet.getRange(i+1, 9).setValue(new Date());
-      return;
+    // Everything else is staff-only
+    if (!isAuthorized(data.key)) {
+      return jsonResponse({ success: false, error: 'unauthorized' });
     }
+    if (type === 'admin_ping') return jsonResponse({ success: true });
+    if (type === 'admin_pull') {
+      const out = {};
+      Object.keys(COLLECTIONS).forEach(name => { out[name] = readCollection(name); });
+      return jsonResponse({ success: true, data: out });
+    }
+    if (type === 'admin_upsert') {
+      requireCollection(data.collection);
+      return jsonResponse(withLock(() => {
+        upsertRecords(data.collection, Array.isArray(data.records) ? data.records : []);
+        appendLog('admin_upsert', data.collection + ' × ' + (data.records || []).length);
+        return { success: true };
+      }));
+    }
+    if (type === 'admin_delete') {
+      requireCollection(data.collection);
+      return jsonResponse(withLock(() => {
+        deleteRecords(data.collection, Array.isArray(data.ids) ? data.ids : []);
+        appendLog('admin_delete', data.collection + ' × ' + (data.ids || []).length);
+        return { success: true };
+      }));
+    }
+    return jsonResponse({ success: false, error: 'Unknown request type' });
+  } catch (err) {
+    return jsonResponse({ success: false, error: String(err && err.message || err) });
   }
 }
 
-function writeFullInventory(ss, inventory) {
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.inventory, inventoryHeaders());
-  // Clear everything and rewrite — truly idempotent, no duplicates ever
-  sheet.clear(); // clears both content AND formatting
-  const hdrs = inventoryHeaders();
-  const hdrRange = sheet.getRange(1, 1, 1, hdrs.length);
-  hdrRange.setValues([hdrs]);
-  hdrRange.setBackground('#1a2e44');
-  hdrRange.setFontColor('#ffffff');
-  hdrRange.setFontWeight('bold');
-  hdrRange.setFontSize(10);
-  sheet.setFrozenRows(1);
-  sheet.setColumnWidths(1, hdrs.length, 160);
-  inventory.forEach(item => {
-    const status = item.stock <= 0 ? 'Out of Stock' : 'In Stock';
-    sheet.appendRow([item.id, item.name, item.brand||'', item.category||'', item.condition||'',
-      item.price||0, item.msrp||0, item.refPrice||0, item.stock||0, status, item.storageLocation||'', item.imageUrl||'', new Date(), item._custom||false]);
-    formatLastRow(sheet, status === 'Out of Stock' ? '#FFEBEE' : (item.storageLocation ? '#F0FFF0' : '#F3F8FF'));
-  });
+// ─── ORDERS ───
+function placeOrder(d) {
+  if (d.website) return { success: true }; // honeypot — silently ignore bots
+
+  const sales = readCollection('sales');
+  if (d.clientRef) {
+    const dup = sales.find(s => s.clientRef === d.clientRef);
+    if (dup) return { success: true, order: publicOrder(dup) };
+  }
+
+  const firstName = clean(d.firstName, 60), lastName = clean(d.lastName, 60);
+  const phone = clean(d.phone, 30), email = clean(d.email, 120);
+  if (!firstName || !lastName) return fail('Please enter your first and last name.');
+  if (!validPhone(phone)) return fail('Please enter a valid phone number.');
+  if (!validEmail(email)) return fail('Please enter a valid email address.');
+
+  const fulfillment = d.fulfillment === 'delivery' ? 'delivery' : 'pickup';
+  const address = clean(d.address, 200);
+  if (fulfillment === 'delivery' && !address) return fail('Please enter a delivery address.');
+
+  const lines = Array.isArray(d.lineItems) ? d.lineItems.slice(0, 50) : [];
+  if (!lines.length) return fail('Your cart is empty.');
+
+  const inventory = readCollection('inventory');
+  const byId = {};
+  inventory.forEach(p => { byId[p.id] = p; });
+
+  let subtotal = 0, itemCount = 0;
+  const itemTexts = [], resolved = [];
+  for (let i = 0; i < lines.length; i++) {
+    const qty = Math.max(1, parseInt(lines[i].qty, 10) || 1);
+    const p = byId[lines[i].id];
+    if (!p) return fail('One of the items in your cart is no longer available. Please refresh and try again.');
+    if ((p.stock || 0) < qty) {
+      return fail((p.stock || 0) > 0
+        ? `Only ${p.stock} of "${p.name}" left — please update your cart.`
+        : `"${p.name}" just sold out — please remove it from your cart.`);
+    }
+    const price = Number(p.price) || 0;
+    subtotal += price * qty;
+    itemCount += qty;
+    itemTexts.push(`${p.name} x${qty} ($${(price * qty).toFixed(2)})`);
+    resolved.push({ p: p, qty: qty, price: price });
+  }
+  subtotal = round2(subtotal);
+  const tax = round2(subtotal * TAX_RATE);
+
+  const order = {
+    orderId: 'ORD-' + Date.now(),
+    clientRef: clean(d.clientRef, 60),
+    timestamp: new Date().toISOString(),
+    status: 'pending',
+    firstName: firstName, lastName: lastName, phone: phone, email: email,
+    fulfillment: fulfillment, address: address,
+    availability: clean(d.availability, 200), notes: clean(d.notes, 1000),
+    items: itemTexts.join(' | '),
+    lineItems: resolved.map(r => ({ id: r.p.id, name: r.p.name, qty: r.qty, price: r.price })),
+    itemCount: itemCount, subtotal: subtotal, tax: tax, deliveryFee: 0,
+    total: round2(subtotal + tax)
+  };
+
+  // Decrement stock so nobody else can buy the same unit
+  resolved.forEach(r => { r.p.stock = Math.max(0, (r.p.stock || 0) - r.qty); r.p.updatedAt = order.timestamp; });
+  writeCollection('inventory', inventory);
+
+  sales.push(order);
+  writeCollection('sales', sales);
+  appendLog('order', `${order.orderId} — ${firstName} ${lastName} — $${order.total}`);
+
+  notifyOwner(`🛒 New order request ${order.orderId} — $${order.total.toFixed(2)}`, [
+    `Customer: ${firstName} ${lastName}`, `Phone: ${phone}`, `Email: ${email}`,
+    `Fulfillment: ${fulfillment === 'delivery' ? 'Delivery to ' + address : 'Store pickup'}`,
+    `Availability: ${order.availability || '—'}`, '',
+    'Items:', ...order.lineItems.map(l => `  • ${l.name} × ${l.qty} — $${(l.price * l.qty).toFixed(2)}`), '',
+    `Subtotal: $${subtotal.toFixed(2)}`, `Tax: $${tax.toFixed(2)}`, `Estimated total: $${order.total.toFixed(2)}`,
+    '', `Notes: ${order.notes || '—'}`
+  ], email);
+
+  return { success: true, order: publicOrder(order) };
 }
 
-// ─── ADD NEW PRODUCT (from admin panel) ───
-function addProductToInventory(ss, data) {
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.inventory, inventoryHeaders());
-  sheet.appendRow([
-    data.id || ('PROD-'+Date.now()),
-    data.name || '', data.brand || '', data.category || '',
-    data.condition || 'Used - Good', data.price || 0, data.stock || 1,
-    data.stock > 0 ? 'In Stock' : 'Out of Stock',
-    data.storageLocation || '',
-    new Date(), true  // _custom = true
-  ]);
-  formatLastRow(sheet, '#FFF9C4'); // yellow for new custom products
+function publicOrder(o) {
+  return {
+    orderId: o.orderId, items: o.items, lineItems: o.lineItems || [], itemCount: o.itemCount,
+    subtotal: o.subtotal, tax: o.tax, total: o.total, fulfillment: o.fulfillment
+  };
 }
 
-// ─── LOG ───
-function appendLog(ss, type, data) {
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.log, ['Timestamp (when it happened)','Event Type (what action was triggered)','Summary (details of the event)']);
-  let summary = '';
-  if (type === 'completed_sale')      summary = `Order ${data.orderId} — $${data.total}`;
-  else if (type === 'repair_request') summary = `${data.firstName} ${data.lastName} — ${data.applianceType}`;
-  else if (type === 'add_product')    summary = `New product added: ${data.name}`;
-  else if (type === 'inventory_update') summary = `Stock update: ${data.productName}`;
-  else if (type === 'full_sync')      summary = 'Full admin sync';
-  else summary = type;
-  sheet.appendRow([new Date(), type, summary]);
-}
+// ─── REPAIR / SELL REQUESTS ───
+function logRepair(d) {
+  if (d.website) return { success: true };
+  const repairs = readCollection('repairs');
+  if (d.clientRef) {
+    const dup = repairs.find(r => r.clientRef === d.clientRef);
+    if (dup) return { success: true, ticketId: dup.ticketId };
+  }
+  const r = {
+    ticketId: 'TKT-' + Date.now(),
+    clientRef: clean(d.clientRef, 60),
+    timestamp: new Date().toISOString(),
+    status: 'New',
+    requestType: ['Repair', 'Sell to us', 'Other'].indexOf(d.requestType) >= 0 ? d.requestType : 'Repair',
+    firstName: clean(d.firstName, 60), lastName: clean(d.lastName, 60),
+    phone: clean(d.phone, 30), email: clean(d.email, 120), address: clean(d.address, 200),
+    applianceType: clean(d.applianceType, 40), brand: clean(d.brand, 40),
+    description: clean(d.description, 2000), assignedTo: '', internalNotes: ''
+  };
+  if (!r.firstName || !r.lastName) return fail('Please enter your first and last name.');
+  if (!validPhone(r.phone)) return fail('Please enter a valid phone number.');
+  if (r.email && !validEmail(r.email)) return fail('Please enter a valid email address.');
+  if (!r.address || !r.applianceType || !r.description) return fail('Please fill in all required fields.');
 
+  repairs.push(r);
+  writeCollection('repairs', repairs);
+  appendLog('repair_request', `${r.ticketId} — ${r.firstName} ${r.lastName} — ${r.requestType} — ${r.applianceType}`);
+  notifyOwner(`🔧 New ${r.requestType.toLowerCase()} request ${r.ticketId} — ${r.applianceType}`, [
+    `Customer: ${r.firstName} ${r.lastName}`, `Phone: ${r.phone}`, `Email: ${r.email || '—'}`,
+    `Address: ${r.address}`, `Appliance: ${r.applianceType}${r.brand ? ' · ' + r.brand : ''}`, '',
+    r.description
+  ], r.email);
+  return { success: true, ticketId: r.ticketId };
+}
 
 // ─── VIEWING REQUESTS ───
-function logViewRequest(ss, data) {
-  const headers = ['Timestamp','Name','Phone','Email','Appliance','Brand','Price ($)','Preferred Contact Time','Status'];
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.views, headers);
-  const dt = new Date(data.timestamp || new Date());
-  sheet.appendRow([
-    dt,
-    data.name || '',
-    data.phone || '',
-    data.email || '',
-    data.appliance || '',
-    data.brand || '',
-    data.price || '',
-    data.preferredTime || '',
-    'New'
-  ]);
-  formatLastRow(sheet, '#FFF3E0');
+function logViewRequest(d) {
+  if (d.website) return { success: true };
+  const views = readCollection('views');
+  if (d.clientRef) {
+    const dup = views.find(v => v.clientRef === d.clientRef);
+    if (dup) return { success: true, requestId: dup.requestId };
+  }
+  const product = readCollection('inventory').find(p => p.id === d.productId);
+  const v = {
+    requestId: 'VIEW-' + Date.now(),
+    clientRef: clean(d.clientRef, 60),
+    timestamp: new Date().toISOString(),
+    status: 'New',
+    name: clean(d.name, 120), phone: clean(d.phone, 30), email: clean(d.email, 120),
+    preferredTime: clean(d.preferredTime, 200),
+    productId: product ? product.id : clean(d.productId, 60),
+    appliance: product ? product.name : clean(d.appliance, 120),
+    brand: product ? product.brand : '',
+    price: product ? product.price : 0
+  };
+  if (!v.name) return fail('Please enter your name.');
+  if (!validPhone(v.phone)) return fail('Please enter a valid phone number.');
+  if (v.email && !validEmail(v.email)) return fail('Please enter a valid email address.');
+
+  views.push(v);
+  writeCollection('views', views);
+  appendLog('view_request', `${v.requestId} — ${v.name} — ${v.appliance}`);
+  notifyOwner(`👀 Viewing request — ${v.appliance}`, [
+    `Customer: ${v.name}`, `Phone: ${v.phone}`, `Email: ${v.email || '—'}`,
+    `Appliance: ${v.appliance}${v.brand ? ' · ' + v.brand : ''}${v.price ? ' · $' + v.price : ''}`,
+    `Best time: ${v.preferredTime || '—'}`
+  ], v.email);
+  return { success: true, requestId: v.requestId };
+}
+
+// ─── GENERIC COLLECTION STORAGE ───
+// Every tab has a hidden "_data" column holding the full JSON record, plus
+// readable columns. Editing a readable (non-RO) column in Sheets updates the record.
+function readCollection(name) {
+  const def = COLLECTIONS[name];
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(def.sheet);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(h => String(h).trim());
+  const dataCol = headers.indexOf('_data');
+  const records = [];
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    if (row.every(c => c === '' || c === null)) continue;
+    let rec;
+    if (dataCol >= 0 && row[dataCol]) {
+      try { rec = JSON.parse(row[dataCol]); } catch (err) { rec = {}; }
+      def.cols.forEach(col => {
+        const [header, key, flags] = col;
+        if (flags & RO) return;
+        const c = headers.indexOf(header);
+        if (c >= 0) rec[key] = coerce(row[c], flags);
+      });
+    } else {
+      rec = fromLegacyRow(name, def, headers, row, r);
+    }
+    if (rec && rec[def.idKey]) records.push(rec);
+  }
+  return records;
+}
+
+function fromLegacyRow(name, def, headers, row, rowIndex) {
+  const rec = {};
+  headers.forEach((h, c) => {
+    const key = def.legacy[h];
+    if (!key) return;
+    const colDef = def.cols.find(col => col[1] === key);
+    rec[key] = coerce(row[c], colDef ? colDef[2] : 0);
+  });
+  if (name === 'sales') {
+    if (rec._fullName) {
+      const parts = String(rec._fullName).trim().split(/\s+/);
+      rec.firstName = parts.shift() || ''; rec.lastName = parts.join(' ');
+    }
+    rec.timestamp = toIso(rec._date, rec._time);
+    delete rec._fullName; delete rec._date; delete rec._time;
+    rec.status = rec.status || 'pending';
+  }
+  if (name === 'repairs') {
+    rec.timestamp = toIso(rec._dateSubmitted);
+    delete rec._dateSubmitted;
+    rec.status = rec.status || 'New';
+    rec.requestType = 'Repair';
+    if (!rec.ticketId) rec.ticketId = 'TKT-legacy-' + rowIndex;
+  }
+  if (name === 'views') {
+    rec.timestamp = toIso(rec.timestamp);
+    rec.requestId = 'VIEW-' + (new Date(rec.timestamp).getTime() || ('legacy-' + rowIndex));
+    rec.status = rec.status || 'New';
+  }
+  if (name === 'inventory') {
+    rec.stock = parseInt(rec.stock, 10) || 0;
+  }
+  return rec;
+}
+
+function writeCollection(name, records) {
+  const def = COLLECTIONS[name];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(def.sheet);
+  if (!sheet) sheet = ss.insertSheet(def.sheet);
+
+  if (def.newestFirst) {
+    records = records.slice().sort((a, b) =>
+      new Date(b.timestamp || b.date || 0) - new Date(a.timestamp || a.date || 0));
+  }
+
+  const headers = def.cols.map(c => c[0]).concat(['_data']);
+  const rows = records.map(rec => def.cols.map(col => {
+    const [, key, flags] = col;
+    const v = rec[key];
+    if (key === 'timestamp' || key === 'updatedAt') return v ? formatStamp(v) : '';
+    if (flags & (NUM | INT)) return Number(v) || 0;
+    return v === undefined || v === null ? '' : String(v);
+  }).concat([JSON.stringify(rec)]));
+
+  sheet.clear();
+  const width = headers.length;
+  if (sheet.getMaxRows() < rows.length + 1) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length + 1 - sheet.getMaxRows());
+  if (sheet.getMaxColumns() < width) sheet.insertColumnsAfter(sheet.getMaxColumns(), width - sheet.getMaxColumns());
+  sheet.showColumns(1, width);
+  // Plain-text format stops Sheets from mangling phone numbers, IDs and zip codes
+  if (rows.length) {
+    def.cols.forEach((col, i) => {
+      if (!(col[2] & (NUM | INT))) sheet.getRange(2, i + 1, rows.length, 1).setNumberFormat('@');
+    });
+  }
+  sheet.getRange(1, 1, 1, width).setValues([headers])
+    .setBackground('#1a2e44').setFontColor('#ffffff').setFontWeight('bold').setFontSize(10);
+  if (rows.length) sheet.getRange(2, 1, rows.length, width).setValues(rows);
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidths(1, width - 1, 150);
+  sheet.hideColumns(width);
+}
+
+function upsertRecords(name, incoming) {
+  const def = COLLECTIONS[name];
+  const records = readCollection(name);
+  const index = {};
+  records.forEach((r, i) => { index[r[def.idKey]] = i; });
+  incoming.forEach(rec => {
+    if (!rec || !rec[def.idKey]) return;
+    if (name === 'inventory') rec.updatedAt = new Date().toISOString();
+    const i = index[rec[def.idKey]];
+    if (i === undefined) { index[rec[def.idKey]] = records.length; records.push(rec); }
+    else records[i] = Object.assign({}, records[i], rec);
+  });
+  writeCollection(name, records);
+}
+
+function deleteRecords(name, ids) {
+  const def = COLLECTIONS[name];
+  const drop = {};
+  ids.forEach(id => { drop[id] = true; });
+  writeCollection(name, readCollection(name).filter(r => !drop[r[def.idKey]]));
+}
+
+// ─── AUTH ───
+function isAuthorized(key) {
+  const real = PropertiesService.getScriptProperties().getProperty('ADMIN_KEY');
+  return !!real && typeof key === 'string' && key === real;
+}
+
+// ▶ Run this once from the Apps Script editor. It creates a random staff key.
+function setupAdminKey() {
+  const key = 'oa-' + Utilities.getUuid().replace(/-/g, '');
+  PropertiesService.getScriptProperties().setProperty('ADMIN_KEY', key);
+  Logger.log('Your staff key: ' + key);
+  try {
+    SpreadsheetApp.getUi().alert('Your staff key (paste it into the staff panel → Sheets settings):\n\n' + key);
+  } catch (err) { /* running outside the spreadsheet UI — check the execution log */ }
+  return key;
+}
+
+// Also creates any missing tabs in the new format. Safe to run again.
+function initialSetup() {
+  Object.keys(COLLECTIONS).forEach(name => writeCollection(name, readCollection(name)));
+  if (!PropertiesService.getScriptProperties().getProperty('ADMIN_KEY')) setupAdminKey();
 }
 
 // ─── HELPERS ───
-function salesHeaders() {
-  return ['Order ID','Customer Full Name','Customer Email','Customer Phone','Items Ordered','Item Count','Subtotal ($)','Tax ($)','Delivery Fee ($)','Total Charged ($)','Fulfillment Type (pickup/view/delivery)','Date','Time','Order Status'];
+function withLock(fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try { return fn(); } finally { lock.releaseLock(); }
 }
 
-function inventoryHeaders() {
-  return ['Product ID','Product Name','Brand / Manufacturer','Category (appliance type)','Condition (New/Used/etc)','Our Price ($)','MSRP / Retail Price ($)','Competitor Price ($)','Stock Qty','Status (In Stock / Out of Stock)','Storage Location','Image URL(s)','Last Updated','Admin-Added'];
+function requireCollection(name) {
+  if (!COLLECTIONS[name]) throw new Error('Unknown collection: ' + name);
 }
 
-// Ensures header row exists — adds it if row 1 is blank (e.g. sheet created manually)
-function ensureHeaders(sheet, headers) {
-  const row1 = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-  if (!row1[0]) {
-    const r = sheet.getRange(1, 1, 1, headers.length);
-    r.setValues([headers]);
-    r.setBackground('#1a2e44');
-    r.setFontColor('#ffffff');
-    r.setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
+function fail(msg) { return { success: false, error: msg }; }
+
+function clean(v, max) {
+  if (v === undefined || v === null) return '';
+  return String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, max);
+}
+
+function validEmail(s) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s || ''); }
+function validPhone(s) { const n = String(s || '').replace(/\D/g, ''); return n.length >= 10 && n.length <= 15; }
+function round2(n) { return Math.round(n * 100) / 100; }
+
+function coerce(v, flags) {
+  if (flags & INT) return parseInt(v, 10) || 0;
+  if (flags & NUM) return Number(v) || 0;
+  if (v instanceof Date) return v.toISOString();
+  return v === null || v === undefined ? '' : String(v);
+}
+
+function toIso(date, time) {
+  if (!date) return new Date(0).toISOString();
+  let d = date instanceof Date ? date : new Date(String(date) + (time ? ' ' + time : ''));
+  if (isNaN(d.getTime())) d = new Date(String(date));
+  return isNaN(d.getTime()) ? new Date(0).toISOString() : d.toISOString();
+}
+
+function formatStamp(v) {
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? String(v) : Utilities.formatDate(d, 'America/Los_Angeles', 'MM/dd/yyyy h:mm a');
+}
+
+function notifyOwner(subject, lines, replyTo) {
+  if (!SEND_OWNER_EMAILS || !NOTIFY_EMAIL) return;
+  try {
+    const opts = { to: NOTIFY_EMAIL, subject: subject, body: lines.join('\n') };
+    if (replyTo && validEmail(replyTo)) opts.replyTo = replyTo;
+    MailApp.sendEmail(opts);
+  } catch (err) { /* never block a customer request on email */ }
+}
+
+function appendLog(type, summary) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('Activity Log');
+    if (!sheet) {
+      sheet = ss.insertSheet('Activity Log');
+      sheet.getRange(1, 1, 1, 3).setValues([['Timestamp', 'Event', 'Summary']])
+        .setBackground('#1a2e44').setFontColor('#ffffff').setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+    sheet.appendRow([new Date(), type, summary]);
+  } catch (err) { /* logging is best-effort */ }
 }
 
 function jsonResponse(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function getOrCreateSheet(ss, name, headers) {
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-    const r = sheet.getRange(1, 1, 1, headers.length);
-    r.setValues([headers]);
-    r.setBackground('#1a2e44');
-    r.setFontColor('#ffffff');
-    r.setFontWeight('bold');
-    r.setFontSize(10);
-    sheet.setFrozenRows(1);
-    sheet.setColumnWidths(1, headers.length, 150);
-  }
-  return sheet;
-}
-
-function clearDataRows(sheet) {
-  const last = sheet.getLastRow();
-  if (last > 1) sheet.deleteRows(2, last - 1);
-}
-
-function formatLastRow(sheet, bg) {
-  const lr = sheet.getLastRow(), lc = sheet.getLastColumn();
-  sheet.getRange(lr, 1, 1, lc).setBackground(bg);
-}
-
-function formatDate(d) { return Utilities.formatDate(d, 'America/Los_Angeles', 'MM/dd/yyyy'); }
-function formatTime(d) { return Utilities.formatDate(d, 'America/Los_Angeles', 'HH:mm:ss'); }
-
-// ─── RUN THIS ONCE MANUALLY TO SET UP ALL SHEETS ───
-function initialSetup() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ss.rename('Oceanside Appliance — Database');
-  getOrCreateSheet(ss, SHEET_NAMES.sales, salesHeaders());
-  getOrCreateSheet(ss, SHEET_NAMES.repairs,   ['Ticket ID','First Name','Last Name','Phone','Email','Address','Appliance','Brand','Description','Date Submitted','Status','Assigned To','Notes']);
-  getOrCreateSheet(ss, SHEET_NAMES.inventory, inventoryHeaders());
-  getOrCreateSheet(ss, SHEET_NAMES.log,       ['Timestamp (when it happened)','Event Type (what action was triggered)','Summary (details of the event)']);
-  SpreadsheetApp.getUi().alert('✅ Oceanside Appliance database ready!\n\nNext: Deploy → New Deployment → Web App');
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }

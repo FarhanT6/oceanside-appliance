@@ -3,22 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
   <title>Page Not Found — Oceanside Appliance</title>
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Jost:wght@400;500;600&display=swap" />
   <style>
-    body { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--sky); }
-    .not-found { text-align:center; padding:3rem 2rem; }
-    .not-found-code { font-family:var(--font-display); font-size:8rem; font-weight:700; color:var(--ocean); opacity:0.2; line-height:1; }
-    .not-found-title { font-family:var(--font-display); font-size:2rem; color:var(--navy); margin-bottom:1rem; }
-    .not-found-msg { color:var(--gray-mid); margin-bottom:2rem; font-size:1rem; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Jost', system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(165deg, #eaf5ff, #fff); color: #1a2e44; padding: 2rem; text-align: center; }
+    .code { font-family: 'Cormorant Garamond', Georgia, serif; font-size: clamp(6rem, 20vw, 9rem); font-weight: 700; color: #1a7fc1; opacity: .18; line-height: 1; }
+    h1 { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 2.2rem; margin: .25rem 0 .75rem; }
+    p { color: #6f849a; margin-bottom: 2rem; }
+    .actions { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+    a { display: inline-flex; padding: .85rem 1.6rem; border-radius: 12px; font-weight: 600; text-decoration: none; }
+    .primary { background: #1a7fc1; color: #fff; }
+    .outline { border: 1.5px solid #cfe4f5; color: #1a7fc1; background: #fff; }
   </style>
 </head>
 <body>
-  <div class="not-found">
-    <div class="not-found-code">404</div>
-    <div class="not-found-title">Page Not Found</div>
-    <p class="not-found-msg">The page you're looking for doesn't exist.</p>
-    <a href="/" class="btn-primary">← Back to Home</a>
-  </div>
+  <main>
+    <div class="code">404</div>
+    <h1>Page not found</h1>
+    <p>The page you're looking for doesn't exist or has moved.</p>
+    <div class="actions">
+      <a class="primary" id="homeLink" href="/">Back to the store</a>
+      <a class="outline" href="tel:+17607548200">Call (760) 754-8200</a>
+    </div>
+  </main>
+  <script>
+    // Works both on GitHub Pages (/oceanside-appliance/) and on a custom domain (/)
+    var base = location.pathname.indexOf('/oceanside-appliance') === 0 ? '/oceanside-appliance/' : '/';
+    document.getElementById('homeLink').href = base;
+  </script>
 </body>
 </html>

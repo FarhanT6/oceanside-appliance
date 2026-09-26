@@ -1,151 +1,107 @@
+// ============================================
+//   OCEANSIDE APPLIANCE — PAGE BEHAVIOR
+//   Navigation, scroll effects, repair / sell form, small touches
+// ============================================
 
-// ── Paste your deployed Apps Script URL here ──
-const SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwTvfY5mJPha_m8HO5lN944sGKcC9Xobl0YlhiUw2vf2LGON4nO8gHOE-hYTP7hB3qm/exec';
+document.addEventListener('DOMContentLoaded', () => {
+  // ── Dynamic years (never goes stale) ──
+  const now = new Date().getFullYear();
+  document.querySelectorAll('[data-years]').forEach(el => { el.textContent = now - 1996; });
+  document.querySelectorAll('[data-year]').forEach(el => { el.textContent = now; });
 
-async function logToSheets(type, data) {
-  if (!SHEETS_WEBHOOK_URL || SHEETS_WEBHOOK_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') {
-    console.log('[Sheets Mock]', type, data); return;
-  }
-  try {
-    // Must use text/plain with no-cors — JSON content-type triggers preflight which Google blocks
-    await fetch(SHEETS_WEBHOOK_URL, {
-      method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ type, ...data })
-    });
-  } catch (e) { console.error('Sheets error:', e); }
-}
-
-// ── Scroll reveal ──
-function isInViewport(el) {
-  const r = el.getBoundingClientRect();
-  return r.top < window.innerHeight - 80 && r.bottom > 0;
-}
-function handleReveal() {
-  document.querySelectorAll('.reveal').forEach(el => {
-    if (isInViewport(el)) el.classList.add('visible');
-  });
-}
-window.addEventListener('scroll', handleReveal, { passive: true });
-window.addEventListener('resize', handleReveal, { passive: true });
-document.addEventListener('DOMContentLoaded', () => setTimeout(handleReveal, 100));
-
-// ── Navbar shrink on scroll ──
-window.addEventListener('scroll', () => {
+  // ── Navbar shadow on scroll ──
   const nav = document.getElementById('navbar');
-  if (!nav) return;
-  nav.style.height     = window.scrollY > 60 ? '60px' : '72px';
-  nav.style.boxShadow  = window.scrollY > 60 ? '0 4px 20px rgba(26,111,193,0.1)' : '';
-}, { passive: true });
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 20);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
 
-// ── Mobile hamburger ──
-document.addEventListener('DOMContentLoaded', () => {
-  // Load products from admin-managed inventory
-  if (typeof loadProductsFromStorage === 'function') loadProductsFromStorage();
-  const hamburger = document.getElementById('hamburger');
-  const navLinks  = document.querySelector('.nav-links');
-  if (!hamburger) return;
-  hamburger.addEventListener('click', () => {
-    const open = navLinks.style.display === 'flex';
-    Object.assign(navLinks.style, {
-      display:     open ? 'none' : 'flex',
-      position:    'absolute', top: '72px', left: '0', right: '0',
-      background:  'rgba(255,255,255,0.98)', flexDirection: 'column',
-      padding:     '1rem 2rem 2rem', gap: '1rem',
-      borderBottom:'1px solid var(--gray-light)', boxShadow: 'var(--shadow-md)'
-    });
-  });
-});
+  // ── Mobile menu ──
+  const burger = document.getElementById('hamburger');
+  const links = document.getElementById('navLinks');
+  const setMenu = open => {
+    links.classList.toggle('open', open);
+    burger.setAttribute('aria-expanded', open);
+    burger.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  };
+  burger?.addEventListener('click', () => setMenu(!links.classList.contains('open')));
+  links?.addEventListener('click', e => { if (e.target.closest('a')) setMenu(false); });
+  document.addEventListener('click', e => { if (!e.target.closest('#navbar')) setMenu(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
 
-// ── Toast ──
-let toastTimer;
-function showToast(msg, duration = 3000) {
-  const toast = document.getElementById('toast');
-  toast.textContent = msg; toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
-}
+  // ── Scroll reveal ──
+  const reveals = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(entries => entries.forEach(en => {
+      if (en.isIntersecting) { en.target.classList.add('visible'); io.unobserve(en.target); }
+    }), { rootMargin: '0px 0px -60px 0px', threshold: 0.05 });
+    reveals.forEach(el => io.observe(el));
+  } else {
+    reveals.forEach(el => el.classList.add('visible'));
+  }
 
-// ── Repair form — saves to localStorage AND Google Sheets ──
-document.addEventListener('DOMContentLoaded', () => {
+  // ── Phone number formatting on every phone field ──
+  document.querySelectorAll('input[data-phone]').forEach(formatPhoneInput);
+
+  // ── "Sell your appliance" links pre-select the Sell tab ──
+  document.querySelectorAll('[data-sell]').forEach(a => a.addEventListener('click', () => setRequestType('Sell to us')));
+
+  // ── Repair / sell request form ──
   const form = document.getElementById('repairForm');
-  if (!form) return;
+  let repairRef = newClientRef();
+  form.querySelectorAll('input[name="requestType"]').forEach(r => r.addEventListener('change', () => setRequestType(r.value)));
 
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const btn    = document.getElementById('repairSubmitBtn');
-    btn.disabled = true;
-    btn.textContent = '⏳ Submitting…';
+    const ok = validateFields([
+      { el: form.firstName,     test: required, msg: 'Please enter your first name.' },
+      { el: form.lastName,      test: required, msg: 'Please enter your last name.' },
+      { el: form.phone,         test: isValidPhone, msg: 'Please enter a 10-digit phone number.' },
+      { el: form.email,         test: v => !v || isValidEmail(v), msg: 'That email doesn’t look right.' },
+      { el: form.address,       test: required, msg: 'Please enter your address.' },
+      { el: form.applianceType, test: required, msg: 'Please choose the appliance.' },
+      { el: form.description,   test: v => v.length >= 5, msg: 'Please add a short description.' },
+    ]);
+    if (!ok) return;
+
+    const btn = document.getElementById('repairSubmitBtn');
+    const errEl = document.getElementById('repairError');
+    showFormError(errEl, '');
+    setBusy(btn, true, 'Sending…');
 
     const data = Object.fromEntries(new FormData(form).entries());
-    data.timestamp = new Date().toISOString();
-    data.ticketId  = 'TKT-' + Date.now();
-    data.status    = 'New';
+    const res = await apiPost('repair_request', { ...data, clientRef: repairRef });
+    setBusy(btn, false);
 
-    // ── SAVE TO LOCALSTORAGE so admin panel sees it immediately ──
-    const repairs = getStore('repairs');
-    repairs.unshift(data);
-    setStore('repairs', repairs);
+    if (!res.success) return showFormError(errEl, res.error || `Something went wrong. Please try again or call ${BUSINESS_PHONE}.`);
 
-    // ── SYNC TO GOOGLE SHEETS ──
-    logToSheets('repair_request', data); // fire-and-forget — don't block form reset
+    const selling = data.requestType === 'Sell to us';
+    document.getElementById('repairSuccessMsg').textContent =
+      `Thanks, ${data.firstName}! We'll call ${data.phone} shortly${selling ? ' with an offer' : ' to schedule your repair'}.` +
+      (res.ticketId ? ` Your reference number is ${res.ticketId}.` : '');
+    document.getElementById('repairFormContent').hidden = true;
+    const success = document.getElementById('repairSuccess');
+    success.classList.add('show');
+    success.focus();
+  });
 
-    setTimeout(() => {
-      document.getElementById('repairFormContent').style.display = 'none';
-      document.getElementById('repairSuccess').classList.add('show');
-    }, 600);
+  document.getElementById('repairAgainBtn')?.addEventListener('click', () => {
+    form.reset();
+    repairRef = newClientRef();
+    setRequestType('Repair');
+    document.getElementById('repairFormContent').hidden = false;
+    document.getElementById('repairSuccess').classList.remove('show');
+    form.firstName.focus();
   });
 });
 
-function resetRepairForm() {
-  document.getElementById('repairForm').reset();
-  document.getElementById('repairFormContent').style.display = '';
-  document.getElementById('repairSuccess').classList.remove('show');
-  const btn = document.getElementById('repairSubmitBtn');
-  btn.disabled = false;
-  btn.textContent = '📩 Submit Repair Request';
+function setRequestType(type) {
+  const form = document.getElementById('repairForm');
+  const radio = form.querySelector(`input[name="requestType"][value="${type}"]`);
+  if (radio) radio.checked = true;
+  const selling = type === 'Sell to us';
+  document.getElementById('rf-desc-label').textContent = selling ? 'Tell us about the appliance *' : "What's the problem? *";
+  form.description.placeholder = selling
+    ? 'e.g. 5-year-old Samsung French-door fridge, works great, small dent on the side'
+    : 'e.g. Washer won’t drain and makes a grinding noise during the spin cycle';
+  document.getElementById('repairSubmitBtn').querySelector('span').textContent = selling ? 'Get an Offer' : 'Send Request';
 }
-
-// ── Smooth scroll for anchor links ──
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('a[href^="#"]').forEach(a => {
-    a.addEventListener('click', e => {
-      const target = document.querySelector(a.getAttribute('href'));
-      if (target && a.getAttribute('href') !== '#') {
-        e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' });
-      }
-    });
-  });
-});
-
-// ── Try to load products from Google Sheets (two-way sync) ──
-// If sheets URL is set, fetch the product catalog from sheets on page load.
-// Falls back to hardcoded products.js if unavailable.
-async function tryLoadProductsFromSheets() {
-  if (!SHEETS_WEBHOOK_URL || SHEETS_WEBHOOK_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') return;
-  try {
-    const res  = await fetch(SHEETS_WEBHOOK_URL + '?action=getProducts');
-    const data = await res.json();
-    if (data && Array.isArray(data.products) && data.products.length > 0) {
-      // Merge sheet products with hardcoded — sheet takes priority for stock
-      data.products.forEach(sheetProduct => {
-        const local = PRODUCTS.find(p => p.id === sheetProduct.id);
-        if (local) {
-          local.stock       = sheetProduct.stock;
-          local.stockStatus = sheetProduct.stock <= 0 ? 'out' : 'in-stock';
-          local.price       = sheetProduct.price || local.price;
-        } else if (sheetProduct.id) {
-          // New product added via sheets or admin
-          PRODUCTS.push(sheetProduct);
-        }
-      });
-      applyFilters();
-    }
-  } catch (e) {
-    console.log('Sheets product sync skipped (offline or not configured)');
-  }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(tryLoadProductsFromSheets, 500);
-});

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="oa-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2196d3"/>
+      <stop offset="1" stop-color="#1a2e44"/>
+    </linearGradient>
+    <clipPath id="oa-clip"><circle cx="24" cy="24" r="24"/></clipPath>
+  </defs>
+  <circle cx="24" cy="24" r="24" fill="url(#oa-bg)"/>
+  <g clip-path="url(#oa-clip)">
+    <path d="M0 35c5-3.2 9.5-3.2 14 0s9.5 3.2 14 0 9.5-3.2 14 0 5 2 6 1.4V48H0Z" fill="#5bb8f5" opacity=".45"/>
+    <path d="M0 39.5c5-3 9.5-3 14 0s9.5 3 14 0 9.5-3 14 0 5 1.8 6 1.3V48H0Z" fill="#5bb8f5" opacity=".6"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="16.5" y="8.5" width="15" height="24" rx="2.6"/>
+    <path d="M16.5 17h15M20.5 11.8v2.2M20.5 20.5v4"/>
+  </g>
+</svg>

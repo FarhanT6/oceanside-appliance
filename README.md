@@ -11,11 +11,12 @@ A fully functional e-commerce and business management platform built for a real 
 This is a production website for an active business. It handles the full customer journey and gives the owner a private admin panel to manage everything — no third-party CMS, no WordPress, no boilerplate.
 
 **Customer-facing:**
-- Browse and filter inventory by appliance type, brand, price, and condition (New / Used)
-- Add items to cart, review order, and submit purchase requests with a 3-step checkout flow
+- Browse live inventory with category chips, search, and filters for brand, price and condition (New / Used)
+- Add items to cart and reserve them with a 3-step order request (stock is checked and held on the server)
 - Schedule a viewing appointment for used appliances (View In Person form)
-- Submit appliance repair requests with a structured intake form
-- Fully responsive across mobile, tablet, and desktop
+- Request a repair, or ask for an offer on an appliance you want to sell
+- Map, directions, click-to-call, and a sticky call / repair / cart bar on phones
+- Fully responsive and keyboard-accessible (Escape closes dialogs, focus is trapped in modals)
 
 **Admin panel** (private, password-protected at `/staff-9k2x/`):
 - Dashboard with live KPIs — sales revenue, repair revenue, total revenue, open orders
@@ -24,7 +25,8 @@ This is a production website for an active business. It handles the full custome
 - Repair request tracking: ticket status workflow (New → Scheduled → In Progress → Completed)
 - Viewing requests log: see who wants to view which appliance
 - Financial ledger: separate tabs for sales revenue and manual repair revenue entries, date filtering, printable invoices
-- Real-time Google Sheets sync: every state change auto-syncs to a live spreadsheet
+- Google Sheets as the database: loads fresh data on open, saves every change, refreshes every minute
+- Cancelling an order automatically returns its items to stock
 
 ---
 
@@ -32,28 +34,44 @@ This is a production website for an active business. It handles the full custome
 
 | Layer | Technology |
 |---|---|
-| Frontend | Vanilla HTML5, CSS3, JavaScript (ES6+) |
-| Email notifications | EmailJS (order confirmations + owner alerts) |
-| Database / sync | Google Sheets via Google Apps Script (REST webhook) |
+| Frontend | Vanilla HTML5, CSS3, JavaScript (ES6+) — no frameworks, no build step |
+| Database | Google Sheets, via a Google Apps Script web app (`google-apps-script.js`) |
+| Email | Owner alerts: Apps Script `MailApp` · Customer order confirmations: EmailJS |
 | Hosting | GitHub Pages |
-| Auth | SHA-256 hashed password via Web Crypto API |
-| Storage | localStorage (client-side persistence) |
-
-**No frameworks. No npm. No build step.** Everything ships as static files.
+| Staff auth | Password screen + a secret staff key checked by Apps Script |
 
 ---
 
-## Architecture Highlights
+## How the data flows
 
-**Google Sheets as a live database** — The admin panel syncs inventory, sales, and repair requests to Google Sheets in real time using a custom Apps Script webhook. Requests are sent as `text/plain` with `no-cors` to work around CORS preflight restrictions on Google's endpoints. Each sync does a full `sheet.clear()` before rewriting to prevent duplicate rows from accumulating.
+```
+ Customer browser ──GET ?action=products──▶ Apps Script ──▶ Inventory tab
+ Customer browser ──POST order / repair / view request──▶ Apps Script ──▶ Sales / Repair Requests / Viewing Requests tabs
+                                                             └─▶ emails the owner
+ Staff panel ──POST admin_pull / admin_upsert / admin_delete + staff key──▶ Apps Script
+```
 
-**Fire-and-forget sync pattern** — Sheets sync calls are intentionally non-blocking (`logToSheets(...)` without `await`). This keeps checkout confirmation and repair form submission instant for the user while data still syncs in the background.
+- **Google Sheets is the single source of truth.** Every customer sees the same inventory, and every order or request lands in the spreadsheet no matter which device it came from.
+- **Orders are validated on the server.** Apps Script re-reads prices and stock, rejects overselling, calculates tax, and reserves the items (decrements stock) in one locked step.
+- **The staff panel saves one record at a time** (`admin_upsert` / `admin_delete`). It never clears and rewrites a whole tab, so it can't wipe out requests that customers submitted.
+- **Staff-only actions need the staff key.** Anyone can read the public catalog or submit a request; only someone with the key can read customer details or change inventory.
+- **Duplicate-safe.** Each submission carries a random `clientRef`; if a request is retried, Apps Script returns the original instead of creating a second order.
+- **You can edit the Sheet directly.** Change a price, stock count, description or status in a readable column and the website and staff panel pick it up. (The hidden `_data` column stores the full record — leave it alone.)
 
-**Condition-aware UI** — Products have a condition field (New / Open Box / Used grades). The "View In Person" appointment button only renders for non-new items — new sealed appliances don't need a viewing. This logic runs at render time in `products.js`.
+---
 
-**SHA-256 admin auth** — The admin password is never stored in plain text. On login, the input is hashed client-side using the Web Crypto API and compared against a stored hash. Safe to keep in a public repo.
+## Google Sheets setup (one time, ~5 minutes)
 
-**Auto-sync on every mutation** — Rather than requiring manual sync clicks, every inventory edit, status change, or deletion fires a background Sheets sync automatically via `autoSyncInventory()`, `autoSyncSales()`, and `autoSyncRepairs()`.
+1. Open the spreadsheet → **Extensions → Apps Script**.
+2. Replace everything in the editor with the contents of `google-apps-script.js` → **Save**.
+3. In the function dropdown pick **`setupAdminKey`** → **▶ Run** → approve the permissions (it needs Sheets + "send email as you" for owner alerts). Copy the staff key it shows (also in **View → Executions / Logs**).
+4. **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy.** The web-app URL stays the same.
+5. Open the staff panel → click **Google Sheets** at the bottom of the sidebar → paste the staff key → **Save & Connect**.
+   The first time you connect, anything that only existed in that browser (old orders, repairs, ledger entries, product details) is copied up to the Sheet automatically.
+
+Existing tabs in the old format are read automatically and converted to the new format the next time they're written.
+
+To change the key later, run `setupAdminKey()` again and paste the new key into the staff panel.
 
 ---
 
@@ -61,47 +79,46 @@ This is a production website for an active business. It handles the full custome
 
 ```
 oceanside-appliance/
-├── index.html              — Main public website
-├── css/styles.css          — Design system (ocean blue theme, Cormorant + Jost fonts)
+├── index.html              — Public website
+├── 404.html                — Not-found page
+├── css/styles.css          — Design system (shared with the staff panel)
+├── img/                    — Logo, favicon, social-share image
 ├── js/
-│   ├── products.js         — Product catalog, filters, condition logic, View In Person
-│   ├── cart.js             — Cart state management
-│   ├── checkout.js         — 3-step checkout modal, EmailJS integration
-│   ├── main.js             — Scroll effects, repair form, Sheets webhook
-│   └── logo.js             — SVG badge logo
-├── staff-9k2x/             — Admin panel (obscure path, not linked publicly)
-│   ├── index.html          — Login + admin app shell
-│   ├── admin.js            — All admin logic (~850 lines)
-│   └── admin.css           — Admin-specific styles
-├── google-apps-script.js   — Paste into Google Apps Script for Sheets integration
-├── robots.txt              — Blocks admin path from crawlers
-└── netlify.toml / .htaccess — Security headers, redirect rules
+│   ├── core.js             — Config, Sheets API, validation, modals, toast
+│   ├── products.js         — Catalog, search, filters, product + viewing modals
+│   ├── cart.js             — Cart
+│   ├── checkout.js         — 3-step order request, EmailJS confirmation
+│   ├── main.js             — Nav, scroll effects, repair / sell form
+│   └── logo.js             — Logo for the staff panel
+├── staff-9k2x/             — Staff panel (not linked publicly, noindex)
+├── google-apps-script.js   — Paste into Apps Script (see setup above)
+├── robots.txt / sitemap.xml
+└── netlify.toml / .htaccess — Security headers (only used if hosted on Netlify / Apache)
 ```
 
 ---
 
 ## Features By the Numbers
 
-- ~2,500 lines of vanilla JavaScript across 5 files
-- 7 data types managed: inventory, sales, repairs, viewing requests, repair revenue, ledger entries, activity log
-- 5 Google Sheets tabs auto-populated: Inventory, Sales, Repair Requests, Viewing Requests, Activity Log
+- Vanilla JavaScript, no dependencies besides EmailJS
+- 5 data types: inventory, sales, repair / sell requests, viewing requests, repair revenue
+- 6 Google Sheets tabs: Inventory, Sales, Repair Requests, Viewing Requests, Repair Revenue, Activity Log
 - 6 admin tabs: Dashboard, Sales, Repairs, Inventory, Ledger, (viewing requests on dashboard)
 - Invoice generator for both sales and repair revenue with browser print-to-PDF
-- Cross-tab localStorage sync (admin inventory changes reflect on the shop instantly)
 
 ---
 
 ## Running Locally
 
-No build step needed — just open the files.
+No build step. Serve the folder with any static server (opening the file directly works too, but a server matches GitHub Pages):
 
 ```bash
 git clone https://github.com/FarhanT6/oceanside-appliance.git
 cd oceanside-appliance
-open index.html   # or use Live Server in VS Code
+python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
-The admin panel is at `/staff-9k2x/`. Google Sheets sync requires a deployed Apps Script endpoint (see `google-apps-script.js`).
+The staff panel is at `/staff-9k2x/`. The Sheets URL lives in `js/core.js` (`SHEETS_WEBHOOK_URL`) and in the staff panel's settings.
 
 ---
 
