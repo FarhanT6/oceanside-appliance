@@ -2,5 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /staff-9k2x/
 
-# Update the sitemap URL below with your actual domain
-Sitemap: https://www.oceansideappliance.com/sitemap.xml
+Sitemap: https://farhant6.github.io/oceanside-appliance/sitemap.xml

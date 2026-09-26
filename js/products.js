@@ -1,258 +1,417 @@
-// ── Product Catalog ──
-// All products come from Admin Panel → stored in localStorage as 'oa_inventory'
-let PRODUCTS = [];
+// ============================================
+//   OCEANSIDE APPLIANCE — PRODUCT CATALOG
+//   Inventory lives in Google Sheets (managed from the staff panel).
+//   We show a cached copy instantly, then refresh from Sheets.
+// ============================================
 
-function loadProductsFromStorage() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('oa_inventory') || '[]');
-    PRODUCTS = Array.isArray(saved) ? saved : [];
-  } catch(e) {
-    PRODUCTS = [];
-  }
-  if (document.getElementById('productsGrid')) applyFilters();
+let PRODUCTS = [];
+let productsState = 'loading'; // loading | ready | error
+const PRODUCTS_CACHE_KEY = 'oa_products_cache';
+const PRODUCTS_CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
+
+let currentFilters = { type: '', brand: '', price: '', sort: 'default', condition: '', q: '' };
+
+function getProduct(id) { return PRODUCTS.find(p => p.id === id); }
+function isNew(p) { return String(p.condition || '').toLowerCase().startsWith('new'); }
+
+function normalizeProduct(p) {
+  return {
+    ...p,
+    id: String(p.id || ''),
+    name: String(p.name || 'Appliance'),
+    brand: String(p.brand || ''),
+    category: String(p.category || 'other').toLowerCase(),
+    price: Number(p.price) || 0,
+    msrp: Number(p.msrp) || 0,
+    refPrice: Number(p.refPrice) || 0,
+    stock: Math.max(0, parseInt(p.stock, 10) || 0),
+  };
 }
 
-// ── FILTER STATE ──
-let currentFilters = { type: '', brand: '', price: '', sort: 'default', condition: '' };
+function setProducts(list, state) {
+  PRODUCTS = (Array.isArray(list) ? list : []).map(normalizeProduct).filter(p => p.id);
+  productsState = state;
+  buildBrandOptions();
+  renderCategoryChips();
+  updateHeroPrices();
+  applyFilters();
+  if (typeof updateCartUI === 'function') updateCartUI();
+}
 
+function readCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(PRODUCTS_CACHE_KEY) || 'null');
+    if (c && Array.isArray(c.products) && Date.now() - c.at < PRODUCTS_CACHE_MAX_AGE) return c.products;
+  } catch {}
+  return null;
+}
+
+async function loadProducts() {
+  const cached = readCache();
+  if (cached && cached.length) setProducts(cached, 'ready');
+  else renderSkeletons();
+
+  try {
+    const data = await apiGet('products');
+    if (!data || !Array.isArray(data.products)) throw new Error('Unexpected response');
+    try { localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify({ at: Date.now(), products: data.products })); } catch {}
+    setProducts(data.products, 'ready');
+  } catch (err) {
+    console.warn('Could not load inventory from Google Sheets', err);
+    if (!cached || !cached.length) { productsState = 'error'; applyFilters(); }
+  }
+}
+
+// ── FILTERING ──
 function applyFilters() {
   const grid = document.getElementById('productsGrid');
   if (!grid) return;
-  let list = [...PRODUCTS];
-  if (currentFilters.type)  list = list.filter(p => p.category === currentFilters.type);
-  if (currentFilters.brand) list = list.filter(p => p.brand === currentFilters.brand);
-  if (currentFilters.condition === 'new')  list = list.filter(p => (p.condition||'').startsWith('New'));
-  if (currentFilters.condition === 'used') list = list.filter(p => !(p.condition||'').startsWith('New'));
-  if (currentFilters.price) {
-    const [min, max] = currentFilters.price.split('-').map(Number);
-    list = list.filter(p => (p.price || 0) >= min && (p.price || 0) <= max);
+  if (productsState === 'loading' && !PRODUCTS.length) return renderSkeletons();
+  if (productsState === 'error' && !PRODUCTS.length) return renderMessage('error');
+
+  const f = currentFilters;
+  const q = f.q.toLowerCase();
+  let list = PRODUCTS.filter(p =>
+    (!f.type || p.category === f.type) &&
+    (!f.brand || p.brand === f.brand) &&
+    (f.condition !== 'new' || isNew(p)) &&
+    (f.condition !== 'used' || !isNew(p)) &&
+    (!q || `${p.name} ${p.brand} ${p.model || ''} ${p.category} ${p.condition || ''}`.toLowerCase().includes(q))
+  );
+  if (f.price) {
+    const [min, max] = f.price.split('-').map(Number);
+    list = list.filter(p => p.price >= min && p.price <= max);
   }
-  if (currentFilters.sort === 'price-asc')  list.sort((a,b) => (a.price||0) - (b.price||0));
-  if (currentFilters.sort === 'price-desc') list.sort((a,b) => (b.price||0) - (a.price||0));
-  if (currentFilters.sort === 'name-asc')   list.sort((a,b) => (a.name||'').localeCompare(b.name||''));
-  list.sort((a,b) => ((a.stock||0) <= 0 ? 1 : 0) - ((b.stock||0) <= 0 ? 1 : 0));
+  if (f.sort === 'price-asc')  list.sort((a,b) => a.price - b.price);
+  if (f.sort === 'price-desc') list.sort((a,b) => b.price - a.price);
+  if (f.sort === 'name-asc')   list.sort((a,b) => a.name.localeCompare(b.name));
+  // Sold-out items always go last
+  list.sort((a,b) => (a.stock <= 0) - (b.stock <= 0));
+
+  updateFilterBadge();
   renderProducts(list);
+}
+
+function activeFilterCount() {
+  const f = currentFilters;
+  return [f.brand, f.price, f.condition, f.sort !== 'default' ? 'x' : ''].filter(Boolean).length;
+}
+function updateFilterBadge() {
+  const b = document.getElementById('filterBadge');
+  if (!b) return;
+  const n = activeFilterCount();
+  b.hidden = !n;
+  b.textContent = n;
+}
+
+function resetFilters() {
+  currentFilters = { type: '', brand: '', price: '', sort: 'default', condition: '', q: '' };
+  ['filterBrand','filterPrice','filterCondition'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const sort = document.getElementById('filterSort'); if (sort) sort.value = 'default';
+  const search = document.getElementById('searchInput'); if (search) search.value = '';
+  renderCategoryChips();
+  applyFilters();
+}
+
+function setCategory(cat) {
+  currentFilters.type = cat;
+  renderCategoryChips();
+  applyFilters();
+}
+
+function renderCategoryChips() {
+  const wrap = document.getElementById('categoryChips');
+  if (!wrap) return;
+  const counts = {};
+  PRODUCTS.forEach(p => { if (p.stock > 0) counts[p.category] = (counts[p.category] || 0) + 1; });
+  const total = PRODUCTS.filter(p => p.stock > 0).length;
+  const cats = CATEGORIES.filter(c => c.id !== 'other' || counts.other);
+  const chip = (id, label, count, ic) => `
+    <button type="button" class="chip${PRODUCTS.length && !count ? ' empty' : ''}" role="tab" data-cat="${id}" aria-selected="${currentFilters.type === id}">
+      ${icon(ic)}${esc(label)}${PRODUCTS.length ? `<span class="count">${count || 0}</span>` : ''}
+    </button>`;
+  wrap.innerHTML = chip('', 'All', total, 'all') + cats.map(c => chip(c.id, c.label, counts[c.id], c.id)).join('');
+}
+
+function buildBrandOptions() {
+  const sel = document.getElementById('filterBrand');
+  if (!sel) return;
+  const brands = [...new Set(PRODUCTS.map(p => p.brand).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All brands</option>' + brands.map(b => `<option>${esc(b)}</option>`).join('');
+  sel.value = brands.includes(current) ? current : '';
+  if (!brands.includes(current)) currentFilters.brand = '';
+}
+
+function updateHeroPrices() {
+  document.querySelectorAll('[data-from]').forEach(el => {
+    const prices = PRODUCTS.filter(p => p.category === el.dataset.from && p.stock > 0 && p.price > 0).map(p => p.price);
+    el.textContent = prices.length ? `From ${money(Math.min(...prices))}` : 'Browse';
+  });
+}
+
+// ── RENDERING ──
+function renderSkeletons() {
+  const grid = document.getElementById('productsGrid');
+  const count = document.getElementById('resultsCount');
+  if (count) count.textContent = 'Loading inventory…';
+  grid.setAttribute('aria-busy', 'true');
+  grid.innerHTML = Array.from({ length: 6 }, () => `
+    <div class="product-card skeleton" aria-hidden="true">
+      <div class="product-media"></div>
+      <div class="product-info">
+        <div class="sk" style="width:40%"></div>
+        <div class="sk" style="width:80%;height:20px;margin-top:.4rem"></div>
+        <div class="sk" style="width:95%;margin-top:.4rem"></div>
+        <div class="sk" style="width:30%;height:24px;margin-top:1rem"></div>
+      </div>
+    </div>`).join('');
+}
+
+function renderMessage(kind) {
+  const grid = document.getElementById('productsGrid');
+  const count = document.getElementById('resultsCount');
+  grid.removeAttribute('aria-busy');
+  const tel = `<a class="btn-outline" href="tel:+17607548200">${icon('phone')}Call ${BUSINESS_PHONE}</a>`;
+  let html;
+  if (kind === 'error') {
+    if (count) count.textContent = '';
+    html = `${icon('refresh')}<h3>We couldn't load our inventory</h3>
+      <p>This is usually a temporary connection issue. Try again, or give us a call — we always have more in the store than we can list online.</p>
+      <div class="actions"><button type="button" class="btn-primary" id="retryProducts">${icon('refresh')}Try again</button>${tel}</div>`;
+  } else if (kind === 'none') {
+    html = `${icon('store')}<h3>New inventory coming soon</h3>
+      <p>We're updating our online listings. Call or stop by — we have appliances in the store every day.</p>
+      <div class="actions">${tel}</div>`;
+  } else {
+    html = `${icon('search')}<h3>No matches</h3>
+      <p>Nothing matches those filters right now. Try clearing them, or call us — we can often find exactly what you need.</p>
+      <div class="actions"><button type="button" class="btn-primary" data-reset>Clear filters</button>${tel}</div>`;
+  }
+  grid.innerHTML = `<div class="grid-message">${html}</div>`;
 }
 
 function renderProducts(list) {
   const grid    = document.getElementById('productsGrid');
   const countEl = document.getElementById('resultsCount');
-  if (!grid) return;
-  grid.innerHTML = '';
-  if (countEl) countEl.textContent = `Showing ${list.length} product${list.length !== 1 ? 's' : ''}`;
+  grid.removeAttribute('aria-busy');
 
-  if (list.length === 0) {
-    grid.innerHTML = `<p style="grid-column:1/-1;text-align:center;color:var(--gray-mid);padding:3rem">
-      No products match your filters.
-      <button onclick="resetFilters()" style="background:none;border:none;color:var(--ocean);cursor:pointer;font-weight:600">Clear filters →</button></p>`;
-    return;
+  if (!PRODUCTS.length) { if (countEl) countEl.textContent = ''; return renderMessage('none'); }
+  if (countEl) {
+    const inStock = list.filter(p => p.stock > 0).length;
+    countEl.textContent = `${list.length} appliance${list.length !== 1 ? 's' : ''}${inStock !== list.length ? ` · ${inStock} in stock` : ''}`;
   }
+  if (!list.length) return renderMessage('filtered');
 
-  list.forEach((p, i) => {
-    const stock     = p.stock || 0;
-    const price     = p.price || 0;
-    const name      = p.name || 'Unnamed Product';
-    const brand     = p.brand || '';
-    const cat       = p.category || '';
-    const catLabel  = cat ? cat.charAt(0).toUpperCase() + cat.slice(1) : 'Appliance';
-    const desc      = p.desc || '';
-    const icon      = p.icon || '📦';
-    const images    = p.imageUrl ? p.imageUrl.split(',').map(u=>u.trim()).filter(Boolean) : [];
-    const hasImage  = images.length > 0;
-    const stockDot  = stock > 0 ? '' : ' out';
-    const stockText = stock > 0 ? 'In Stock' : 'Out of Stock';
-    const oldPrice  = p.oldPrice ? `<span class="old-price">$${p.oldPrice.toLocaleString()}</span>` : '';
-    const badge     = p.badge ? `<div class="product-badge ${p.badge}">${p.badgeText || ''}</div>` : '';
-
-    const card = document.createElement('div');
-    card.className = 'product-card reveal';
-    card.style.transitionDelay = `${(i % 4) * 0.07}s`;
-    card.innerHTML = `
-      ${badge}
-      <div class="product-image-wrap" style="${hasImage ? 'padding:0;overflow:hidden;' : ''}">
-        ${hasImage
-          ? `<img src="${images[0]}" alt="${name}" style="width:100%;height:100%;object-fit:cover;transition:.3s ease" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" /><span style="display:none;font-size:5rem;width:100%;height:100%;align-items:center;justify-content:center">${icon}</span>`
-          : icon}
+  const inCart = id => (typeof cart !== 'undefined' ? cart.find(i => i.id === id)?.qty : 0) || 0;
+  grid.innerHTML = list.map((p, i) => {
+    const imgs = productImages(p);
+    const out = p.stock <= 0;
+    const compare = Math.max(p.msrp, p.refPrice, Number(p.oldPrice) || 0);
+    const save = compare > p.price ? compare - p.price : 0;
+    const catLabel = CATEGORY_SINGULAR[p.category] || 'Appliance';
+    const stockClass = out ? ' out' : p.stock <= 2 ? ' low' : '';
+    const stockText = out ? 'Sold out' : p.stock <= 2 ? `Only ${p.stock} left` : 'In stock';
+    const soldAll = !out && inCart(p.id) >= p.stock;
+    return `
+    <article class="product-card${out ? ' sold-out' : ''}" data-id="${esc(p.id)}" tabindex="0" style="animation-delay:${Math.min(i, 8) * 40}ms" aria-label="${esc(p.name)}, ${money(p.price)}">
+      <div class="product-media">
+        ${imgs.length
+          ? `<img src="${esc(imgs[0])}" alt="${esc(p.name)}" loading="lazy" decoding="async" data-fallback="${categoryIcon(p.category)}" />`
+          : icon(categoryIcon(p.category), 'placeholder-ic')}
+        <div class="product-tags">
+          ${out ? '<span class="tag out">Sold out</span>' : ''}
+          ${p.condition ? `<span class="tag ${isNew(p) ? 'new' : 'used'}">${esc(p.condition)}</span>` : ''}
+          ${save && !out ? `<span class="tag save">Save ${money(save)}</span>` : ''}
+        </div>
       </div>
       <div class="product-info">
-        <div class="product-category">${brand} · ${catLabel}</div>
-        ${p.condition ? `<div style="display:inline-block;margin-bottom:.2rem;padding:.15rem .5rem;border-radius:4px;font-size:.65rem;font-weight:700;letter-spacing:.04em;background:${(p.condition).startsWith('New')?'rgba(39,174,96,.12)':'rgba(52,152,219,.1)'};color:${(p.condition).startsWith('New')?'#27ae60':'#2980b9'}">${p.condition}</div>` : ''}
-        <div class="product-name">${name}</div>
-        <div class="product-desc">${desc}</div>
-        ${!(p.condition||'').startsWith('New') ? `
-        <div style="margin-top:.3rem">
-          <button onclick="openViewModal('${p.id}',event)" style="padding:.3rem .75rem;background:none;border:1px solid var(--ocean);border-radius:6px;color:var(--ocean);font-family:var(--font-body);font-size:.68rem;font-weight:600;cursor:pointer;transition:all .15s" onmouseover="this.style.background='var(--ocean)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--ocean)'">👀 View In Person</button>
-        </div>` : ''}
-        <div class="product-footer" style="margin-top:.5rem">
+        <div class="product-category">${esc([p.brand, catLabel].filter(Boolean).join(' · '))}</div>
+        <h3 class="product-name">${esc(p.name)}</h3>
+        ${p.desc ? `<p class="product-desc">${esc(p.desc)}</p>` : ''}
+        <div class="product-footer">
           <div>
-            <div class="product-price">$${price.toLocaleString()}
-              ${p.msrp && p.msrp > price ? `<span style="font-size:.72rem;color:var(--gray-mid);text-decoration:line-through;margin-left:.35rem">MSRP $${p.msrp.toLocaleString()}</span>` : ''}
-            </div>
-            ${p.msrp && p.msrp > price ? `<div style="font-size:.68rem;color:#27ae60;font-weight:700">You save $${(p.msrp-price).toLocaleString()}</div>` : ''}
-            ${p.refPrice && p.refPrice > price ? `<div style="font-size:.68rem;color:#2980b9;font-weight:700">Beats ${p.refPrice>price?'competitor':'retail'} by $${(p.refPrice-price).toLocaleString()}</div>` : ''}
+            <div class="product-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
           </div>
-          <button class="btn-add-cart" onclick="addToCart('${p.id}',event)"
-            ${stock === 0 ? 'disabled style="opacity:.5;cursor:not-allowed"' : ''}>🛒 Add</button>
+          <div class="product-actions">
+            ${!isNew(p) && !out ? `<button type="button" class="btn-view" data-view="${esc(p.id)}" aria-label="Schedule a viewing of ${esc(p.name)}" title="See it in person">${icon('eye')}</button>` : ''}
+            <button type="button" class="btn-add-cart" data-add="${esc(p.id)}" ${out || soldAll ? 'disabled' : ''}>${out ? 'Sold out' : soldAll ? 'In cart' : `${icon('plus')}Add`}</button>
+          </div>
         </div>
-        <div class="stock-bar" style="margin-top:.4rem">
-          <span class="stock-dot${stockDot}"></span>
-          <span>${stockText}</span>
-        </div>
-      </div>`;
-    card.addEventListener('click', e => { if (!e.target.closest('.btn-add-cart')) openModal(p.id); });
-    grid.appendChild(card);
-  });
-
-  setTimeout(() => {
-    document.querySelectorAll('.product-card.reveal').forEach(el => {
-      if (isInViewport(el)) el.classList.add('visible');
-    });
-  }, 50);
+        <div class="stock-bar"><span class="stock-dot${stockClass}"></span><span>${stockText}</span></div>
+      </div>
+    </article>`;
+  }).join('');
 }
 
-function resetFilters() {
-  currentFilters = { type: '', brand: '', price: '', sort: 'default', condition: '' };
-  ['filterType','filterBrand','filterPrice','filterSort','filterCondition'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = id === 'filterSort' ? 'default' : '';
-  });
-  applyFilters();
-}
-
-function getProduct(id) { return PRODUCTS.find(p => p.id === id); }
-
-// ── MODAL ──
+// ── PRODUCT DETAIL MODAL ──
 function openModal(id) {
   const p = getProduct(id); if (!p) return;
-  const price    = p.price || 0;
-  const name     = p.name || 'Unnamed Product';
-  const brand    = p.brand || '';
-  const desc     = p.desc || '';
-  const icon     = p.icon || '📦';
-  const images   = p.imageUrl ? p.imageUrl.split(',').map(u=>u.trim()).filter(Boolean) : [];
-  const hasImage = images.length > 0;
-  const specs    = Object.entries(p.specs || {}).map(([k,v]) =>
-    `<div class="spec-item"><strong>${k}</strong>${v}</div>`).join('');
-  const oldPriceHtml = p.oldPrice
-    ? `<span style="font-size:1rem;color:var(--gray-mid);text-decoration:line-through;margin-left:.5rem">$${p.oldPrice.toLocaleString()}</span>` : '';
+  const imgs = productImages(p);
+  const out = p.stock <= 0;
+  const compare = Math.max(p.msrp, p.refPrice, Number(p.oldPrice) || 0);
+  const specs = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {});
+  if (p.model) specs.unshift(['Model', p.model]);
+  if (p.condition) specs.unshift(['Condition', p.condition]);
 
   document.getElementById('modalBody').innerHTML = `
-    ${hasImage ? `
-    <div style="position:relative;height:220px;border-radius:var(--radius);overflow:hidden;margin-bottom:1.5rem;background:var(--sky)">
-      <img id="modal-main-img" src="${images[0]}" alt="${name}" style="width:100%;height:100%;object-fit:cover" onerror="this.src=''"/>
-      ${images.length > 1 ? `<div style="display:flex;gap:.35rem;position:absolute;bottom:.5rem;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.4);padding:.3rem .5rem;border-radius:20px">
-        ${images.map((img,i)=>`<div onclick="document.getElementById('modal-main-img').src='${img}'" style="width:8px;height:8px;border-radius:50%;background:${i===0?'#fff':'rgba(255,255,255,.4)'};cursor:pointer"></div>`).join('')}
-      </div>` : ''}
+    <div class="pm-gallery">
+      <div class="pm-main">${imgs.length ? `<img id="pmMainImg" src="${esc(imgs[0])}" alt="${esc(p.name)}" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}</div>
+      ${imgs.length > 1 ? `<div class="pm-thumbs">${imgs.map((src, i) => `<button type="button" data-src="${esc(src)}" aria-label="Photo ${i + 1}" aria-current="${i === 0}"><img src="${esc(src)}" alt="" loading="lazy" /></button>`).join('')}</div>` : ''}
     </div>
-    ${images.length > 1 ? `<div style="display:flex;gap:.5rem;margin-bottom:1rem;overflow-x:auto">
-      ${images.map(img=>`<img src="${img}" onclick="document.getElementById('modal-main-img').src='${img}'" style="width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid var(--gray-light);flex-shrink:0" />`).join('')}
-    </div>` : ''}` :
-    `<div class="modal-image">${icon}</div>`}
-    <div style="color:var(--ocean);font-size:.75rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.4rem">${brand} · Model: ${p.model || '—'}</div>
-    <div class="modal-name">${name}</div>
-    <div class="modal-price">$${price.toLocaleString()}${oldPriceHtml}</div>
-    ${p.msrp && p.msrp > price ? `<div style="font-size:.82rem;color:#27ae60;font-weight:600;margin-top:-.5rem;margin-bottom:.5rem">✓ Save $${(p.msrp-price).toLocaleString()} off MSRP ($${p.msrp.toLocaleString()})</div>` : ''}
-    ${p.refPrice && p.refPrice > price ? `<div style="font-size:.82rem;color:#2980b9;font-weight:600;margin-top:-.25rem;margin-bottom:.5rem">✓ Beats competitor price of $${p.refPrice.toLocaleString()}</div>` : ''}
-    <p class="modal-desc">${desc}</p>
-    <div class="modal-specs">${specs}</div>
-    <div class="modal-actions">
-      <button class="btn-primary" style="flex:1" onclick="addToCart('${p.id}',event);closeModalDirect();"
-        ${(p.stock||0)===0?'disabled style="opacity:.5"':''}>🛒 ${(p.stock||0)===0?'Out of Stock':'Add to Cart'}</button>
-      ${!(p.condition||'').startsWith('New') ? `<button class="btn-outline" style="flex:1;font-size:.85rem" onclick="closeModalDirect();openViewModal('${p.id}')">👀 View In Person</button>` : `<button class="btn-outline" style="flex:1" onclick="closeModalDirect()">Close</button>`}
-    </div>
-    <div style="margin-top:1rem;padding:.75rem;background:var(--gray-bg);border-radius:8px;font-size:.78rem;color:var(--gray-mid);text-align:center">
-      📍 By appointment only · 1016 S Tremont St, Oceanside
+    <div class="pm-info">
+      <div class="pm-meta">${esc([p.brand, CATEGORY_SINGULAR[p.category]].filter(Boolean).join(' · '))}</div>
+      <h2 class="modal-name" id="modalTitle">${esc(p.name)}</h2>
+      <div class="modal-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
+      ${p.msrp > p.price ? `<div class="product-savings">${icon('check')} Save ${money(p.msrp - p.price)} off MSRP</div>` : ''}
+      ${p.refPrice > p.price ? `<div class="product-savings">${icon('check')} Beats competitor price of ${money(p.refPrice)}</div>` : ''}
+      <div class="stock-bar"><span class="stock-dot${out ? ' out' : p.stock <= 2 ? ' low' : ''}"></span><span>${out ? 'Sold out' : p.stock <= 2 ? `Only ${p.stock} left` : 'In stock and ready'}</span></div>
+      ${p.desc ? `<p class="modal-desc">${esc(p.desc)}</p>` : ''}
+      ${specs.length ? `<div class="modal-specs">${specs.map(([k, v]) => `<div class="spec-item"><strong>${esc(k)}</strong>${esc(v)}</div>`).join('')}</div>` : ''}
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" data-add="${esc(p.id)}" data-close-after ${out ? 'disabled' : ''}>${out ? 'Sold out' : `${icon('cart')}Add to cart`}</button>
+        ${!isNew(p) && !out ? `<button type="button" class="btn-outline" data-view="${esc(p.id)}">${icon('eye')}See it in person</button>` : ''}
+      </div>
+      <div class="pm-note">${icon('pin')}1016 S Tremont St, Oceanside · <a href="tel:+17607548200">${BUSINESS_PHONE}</a></div>
     </div>`;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.body.style.overflow = 'hidden';
+  Modal.open(document.getElementById('modalOverlay'));
 }
 
-function closeModal(e)   { if (e.target === document.getElementById('modalOverlay')) closeModalDirect(); }
-function closeModalDirect() { document.getElementById('modalOverlay').classList.remove('open'); document.body.style.overflow = ''; }
-
+function closeModalDirect() { Modal.close(document.getElementById('modalOverlay')); }
 
 // ── VIEW IN PERSON ──
-function openViewModal(productId, event) {
-  if (event) event.stopPropagation();
+let viewProductId = null;
+let viewClientRef = null;
+
+function openViewModal(productId) {
   const p = getProduct(productId);
-  const label = p ? `👀 ${p.name}${p.brand ? ' · ' + p.brand : ''}` : 'Selected Appliance';
-  document.getElementById('viewInPersonAppliance').textContent = label;
-  document.getElementById('viewInPersonAppliance').dataset.product = productId;
-  ['vip-name','vip-phone','vip-email','vip-time'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('vip-error').style.display = 'none';
-  document.getElementById('viewInPersonOverlay').style.display = 'flex';
-  document.body.style.overflow = 'hidden';
+  viewProductId = productId;
+  viewClientRef = newClientRef();
+  const imgs = p ? productImages(p) : [];
+  document.getElementById('viewProduct').innerHTML = p ? `
+    <span class="thumb">${imgs.length ? `<img src="${esc(imgs[0])}" alt="" />` : icon(categoryIcon(p.category))}</span>
+    <span><strong>${esc(p.name)}</strong><span>${esc([p.brand, p.condition, money(p.price)].filter(Boolean).join(' · '))}</span></span>` : '';
+  const form = document.getElementById('viewForm');
+  form.reset();
+  form.querySelectorAll('.field-error').forEach(e => e.remove());
+  form.querySelectorAll('.invalid').forEach(e => e.classList.remove('invalid'));
+  showFormError(document.getElementById('viewError'), '');
+  document.getElementById('viewFormContent').hidden = false;
+  document.getElementById('viewSuccess').classList.remove('show');
+  Modal.open(document.getElementById('viewOverlay'));
 }
 
-function closeViewModal() {
-  document.getElementById('viewInPersonOverlay').style.display = 'none';
-  document.body.style.overflow = '';
+async function submitViewRequest(e) {
+  e.preventDefault();
+  const form = e.target;
+  const ok = validateFields([
+    { el: form.name,  test: required, msg: 'Please enter your name.' },
+    { el: form.phone, test: isValidPhone, msg: 'Please enter a 10-digit phone number.' },
+    { el: form.email, test: v => !v || isValidEmail(v), msg: 'That email doesn’t look right.' },
+  ]);
+  if (!ok) return;
+  const btn = document.getElementById('viewSubmitBtn');
+  const errEl = document.getElementById('viewError');
+  showFormError(errEl, '');
+  setBusy(btn, true, 'Sending…');
+  const p = getProduct(viewProductId);
+  const res = await apiPost('view_request', {
+    clientRef: viewClientRef,
+    productId: viewProductId,
+    appliance: p ? p.name : '',
+    name: form.name.value.trim(),
+    phone: form.phone.value.trim(),
+    email: form.email.value.trim(),
+    preferredTime: form.preferredTime.value.trim(),
+    website: form.website.value,
+  });
+  setBusy(btn, false);
+  if (!res.success) return showFormError(errEl, res.error || 'Something went wrong. Please try again.');
+  document.getElementById('viewFormContent').hidden = true;
+  const s = document.getElementById('viewSuccess');
+  s.classList.add('show');
+  s.focus();
 }
 
-function closeViewSuccess() {
-  document.getElementById('viewInPersonSuccess').style.display = 'none';
-  document.body.style.overflow = '';
-}
-
-async function submitViewRequest() {
-  const name  = document.getElementById('vip-name').value.trim();
-  const phone = document.getElementById('vip-phone').value.trim();
-  const email = document.getElementById('vip-email').value.trim();
-  const time  = document.getElementById('vip-time').value.trim();
-  const productId = document.getElementById('viewInPersonAppliance').dataset.product;
-  const p = getProduct(productId);
-
-  const errEl = document.getElementById('vip-error');
-  if (!name || !phone) {
-    errEl.textContent = 'Name and phone are required.';
-    errEl.style.display = 'block';
-    return;
-  }
-
-  const data = {
-    type: 'view_request',
-    name, phone, email,
-    preferredTime: time,
-    appliance: p ? p.name : productId,
-    brand: p ? p.brand : '',
-    price: p ? p.price : '',
-    timestamp: new Date().toISOString()
-  };
-
-  // Save to localStorage so admin can see it
-  try {
-    const existing = JSON.parse(localStorage.getItem('oa_view_requests') || '[]');
-    existing.unshift(data);
-    localStorage.setItem('oa_view_requests', JSON.stringify(existing));
-  } catch(e) {}
-
-  // Fire-and-forget to Sheets
-  logToSheets('view_request', data);
-
-  closeViewModal();
-  document.getElementById('viewInPersonSuccess').style.display = 'flex';
-}
-
-// ── INIT ──
+// ── EVENTS ──
 document.addEventListener('DOMContentLoaded', () => {
-  loadProductsFromStorage();
-  document.getElementById('filterType')?.addEventListener('change',  e => { currentFilters.type  = e.target.value; applyFilters(); });
-  document.getElementById('filterBrand')?.addEventListener('change', e => { currentFilters.brand = e.target.value; applyFilters(); });
-  document.getElementById('filterPrice')?.addEventListener('change', e => { currentFilters.price = e.target.value; applyFilters(); });
-  document.getElementById('filterSort')?.addEventListener('change',  e => { currentFilters.sort  = e.target.value; applyFilters(); });
-  document.getElementById('filterResetBtn')?.addEventListener('click', resetFilters);
-  document.getElementById('filterCondition')?.addEventListener('change', e => { currentFilters.condition = e.target.value; applyFilters(); });
+  loadProducts();
 
-  // Auto-refresh if admin updates inventory in another tab
+  const bind = (id, key) => document.getElementById(id)?.addEventListener('change', e => { currentFilters[key] = e.target.value; applyFilters(); });
+  bind('filterBrand', 'brand');
+  bind('filterPrice', 'price');
+  bind('filterSort', 'sort');
+  bind('filterCondition', 'condition');
+  document.getElementById('filterResetBtn')?.addEventListener('click', resetFilters);
+
+  let searchTimer;
+  document.getElementById('searchInput')?.addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { currentFilters.q = e.target.value.trim(); applyFilters(); }, 150);
+  });
+
+  const toggle = document.getElementById('filterToggle');
+  toggle?.addEventListener('click', () => {
+    const panel = document.getElementById('filterPanel');
+    const open = !panel.classList.contains('open');
+    panel.classList.toggle('open', open);
+    toggle.setAttribute('aria-expanded', open);
+  });
+
+  document.getElementById('categoryChips')?.addEventListener('click', e => {
+    const c = e.target.closest('.chip'); if (c) setCategory(c.dataset.cat);
+  });
+
+  const grid = document.getElementById('productsGrid');
+  grid.addEventListener('click', e => {
+    if (e.target.closest('#retryProducts')) { productsState = 'loading'; renderSkeletons(); loadProducts(); return; }
+    if (e.target.closest('[data-reset]')) { resetFilters(); return; }
+    if (e.target.closest('[data-add], [data-view]')) return; // handled globally below
+    const card = e.target.closest('.product-card[data-id]');
+    if (card) openModal(card.dataset.id);
+  });
+  grid.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.product-card[data-id]')) { e.preventDefault(); openModal(e.target.dataset.id); }
+  });
+
+  // Add-to-cart / view buttons anywhere (grid + modal)
+  document.addEventListener('click', e => {
+    const add = e.target.closest('[data-add]');
+    if (add && !add.disabled) {
+      addToCart(add.dataset.add);
+      if (add.hasAttribute('data-close-after')) closeModalDirect();
+      return;
+    }
+    const view = e.target.closest('[data-view]');
+    if (view) {
+      if (Modal.top()?.id === 'modalOverlay') closeModalDirect();
+      openViewModal(view.dataset.view);
+    }
+    const thumb = e.target.closest('.pm-thumbs button');
+    if (thumb) {
+      document.getElementById('pmMainImg').src = thumb.dataset.src;
+      thumb.parentElement.querySelectorAll('button').forEach(b => b.setAttribute('aria-current', b === thumb));
+    }
+  });
+
+  document.getElementById('viewForm')?.addEventListener('submit', submitViewRequest);
+
+  // Broken image link in the sheet → show the category icon instead
+  document.addEventListener('error', e => {
+    const img = e.target;
+    if (img.tagName !== 'IMG' || !img.dataset.fallback) return;
+    const holder = document.createElement('span');
+    holder.innerHTML = icon(img.dataset.fallback, 'placeholder-ic');
+    img.replaceWith(holder.firstChild);
+  }, true);
+
+  document.querySelectorAll('.hero-cat[data-cat]').forEach(btn => btn.addEventListener('click', () => {
+    setCategory(btn.dataset.cat);
+    document.getElementById('products').scrollIntoView({ behavior: 'smooth' });
+  }));
+
+  // Keep in sync when the staff panel updates inventory in another tab
   window.addEventListener('storage', e => {
-    if (e.key === 'oa_inventory') loadProductsFromStorage();
+    if (e.key === PRODUCTS_CACHE_KEY) { const c = readCache(); if (c) setProducts(c, 'ready'); }
   });
 });
-
-function scrollToProducts(filter) {
-  document.getElementById('products').scrollIntoView({ behavior: 'smooth' });
-  setTimeout(() => {
-    const el = document.getElementById('filterType');
-    if (el) { el.value = filter; currentFilters.type = filter; applyFilters(); }
-  }, 600);
-}

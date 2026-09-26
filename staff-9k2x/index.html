@@ -5,9 +5,10 @@
   <meta name="robots" content="noindex, nofollow, noarchive" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
   <link rel="stylesheet" href="../css/styles.css" />
   <link rel="stylesheet" href="admin.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 320'><circle cx='160' cy='160' r='160' fill='%23eaf4fd'/><path d='M0 237 C52 214,82 252,112 234 C142 216,172 246,202 234 C226 222,252 234,320 228 L320 320 L0 320Z' fill='%231a7fc1' opacity='0.35'/><rect x='38' y='102' width='36' height='48' rx='4' fill='none' stroke='%231a2e44' stroke-width='7'/><circle cx='56' cy='132' r='12' fill='none' stroke='%231a7fc1' stroke-width='6'/><rect x='77' y='102' width='36' height='48' rx='4' fill='none' stroke='%231a2e44' stroke-width='7'/><circle cx='95' cy='132' r='12' fill='none' stroke='%231a7fc1' stroke-width='6'/><rect x='147' y='74' width='48' height='84' rx='5' fill='none' stroke='%231a2e44' stroke-width='8'/><line x1='171' y1='74' x2='171' y2='158' stroke='%231a2e44' stroke-width='4' opacity='0.4'/><circle cx='160' cy='160' r='155' fill='none' stroke='%231a2e44' stroke-width='9'/></svg>" /><text y='.9em' font-size='90'>⚙️</text></svg>" />
+  <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
 
@@ -110,7 +111,7 @@
 
     <div class="sidebar-sheets-status" id="sheetsStatus">
       <div class="sheets-dot"></div>
-      <span>Google Sheets</span>
+      <span id="sheetsStatusLabel">Google Sheets</span>
     </div>
   </aside>
 
@@ -122,7 +123,7 @@
       <div class="admin-page-title" id="pageTitle">Dashboard</div>
       <div class="admin-topbar-right">
         <div style="display:flex;gap:.5rem">
-          <button class="btn-sync" id="syncBtn" onclick="syncAllToSheets()">🔄 Sync All to Sheets</button>
+          <button class="btn-sync" id="syncBtn" onclick="pullFromSheets()">🔄 Refresh</button>
         </div>
         <div class="admin-avatar">OA</div>
       </div>
@@ -140,13 +141,13 @@
         <div class="kpi-card">
           <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)">🛒</div>
           <div class="kpi-value" id="kpi-orders">0</div>
-          <div class="kpi-label">Total Orders</div>
+          <div class="kpi-label">Pending Orders</div>
           <div class="kpi-change positive">+8 this week</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">🔧</div>
           <div class="kpi-value" id="kpi-repairs">0</div>
-          <div class="kpi-label">Repair Requests</div>
+          <div class="kpi-label">Open Repair Requests</div>
           <div class="kpi-change neutral">3 pending</div>
         </div>
         <div class="kpi-card">
@@ -177,7 +178,7 @@
           </div>
           <div id="recentRepairsTable">
             <table class="admin-table">
-              <thead><tr><th>Ticket</th><th>Customer</th><th>Appliance</th><th>Urgency</th><th>Status</th></tr></thead>
+              <thead><tr><th>Ticket</th><th>Customer</th><th>Appliance</th><th>Type</th><th>Status</th></tr></thead>
               <tbody id="recentRepairsTbody"></tbody>
             </table>
           </div>
@@ -202,12 +203,12 @@
         <div class="card-header">
           <div class="card-title">Sales History</div>
           <div style="display:flex;gap:.5rem">
-            <button class="card-btn primary" onclick="syncSalesToSheets()">🔄 Sync Sheets</button>
+            <button class="card-btn primary" onclick="pullFromSheets()">🔄 Refresh</button>
             <button class="card-btn" onclick="exportCSV('sales')">📥 Export CSV</button>
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>Order ID</th><th>Items</th><th>Total</th><th>Date & Time</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Date & Time</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="salesTbody"></tbody>
         </table>
       </div>
@@ -219,12 +220,12 @@
         <div class="card-header">
           <div class="card-title">Repair Requests</div>
           <div style="display:flex;gap:.5rem">
-            <button class="card-btn primary" onclick="syncRepairsToSheets()">🔄 Sync Sheets</button>
+            <button class="card-btn primary" onclick="pullFromSheets()">🔄 Refresh</button>
             <button class="card-btn" onclick="exportCSV('repairs')">📥 Export CSV</button>
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>Ticket ID</th><th>Customer</th><th>Phone</th><th>Appliance</th><th>Brand</th><th>Urgency</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Ticket ID</th><th>Customer</th><th>Phone</th><th>Appliance</th><th>Brand</th><th>Type</th><th>Request</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="repairsTbody"></tbody>
         </table>
       </div>
@@ -261,14 +262,14 @@
             <div class="kpi-label">Orders</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">📦</div>
-            <div class="kpi-value" id="ledger-avg">$0</div>
-            <div class="kpi-label">Avg Order Value</div>
+            <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">🔧</div>
+            <div class="kpi-value" id="ledger-repair-rev">$0</div>
+            <div class="kpi-label">Repair Revenue</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-icon" style="background:rgba(26,111,168,0.08);color:var(--ocean)">🏷</div>
-            <div class="kpi-value" id="ledger-tax">$0</div>
-            <div class="kpi-label">Tax Collected</div>
+            <div class="kpi-value" id="ledger-total-rev">$0</div>
+            <div class="kpi-label">Total Revenue</div>
           </div>
         </div>
         <div id="ledger-panel-sales">
@@ -294,12 +295,12 @@
           <div style="display:flex;gap:.75rem;flex-wrap:wrap">
             <button class="card-btn primary" onclick="showAddProduct()">+ Add Product</button>
             <button class="card-btn primary" onclick="saveAllInventory()">💾 Save All</button>
-            <button class="card-btn primary" onclick="syncInventoryToSheets()">🔄 Sync Sheets</button>
+            <button class="card-btn primary" onclick="pullFromSheets()">🔄 Refresh</button>
             <button class="card-btn" onclick="exportCSV('inventory')">📥 CSV</button>
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>ID</th><th>Product</th><th>Category</th><th>Condition</th><th>MSRP / Comp</th><th>Storage</th><th>Image</th><th>Price ($)</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Product</th><th>Category</th><th>Condition</th><th>Storage</th><th>Price ($)</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="inventoryTbody"></tbody>
         </table>
       </div>
@@ -397,26 +398,29 @@
 </div>
 
 <!-- Sheets Config Modal -->
-<div class="modal-overlay" id="sheetsModal" style="display:none;opacity:1;pointer-events:all">
+<div class="modal-overlay" id="sheetsModal" style="display:none;opacity:1;visibility:visible;pointer-events:all">
   <div class="modal" style="max-width:480px">
     <div class="modal-header">
       <div class="modal-name" style="font-size:1.3rem">🔗 Connect Google Sheets</div>
       <button class="modal-close" onclick="document.getElementById('sheetsModal').style.display='none'">✕</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:.85rem;color:var(--gray-mid);margin-bottom:1.5rem">Enter your Google Apps Script Web App URL to enable real-time syncing of sales, repairs, and inventory.</p>
+      <p style="font-size:.85rem;color:var(--gray-mid);margin-bottom:1.5rem">Google Sheets holds all orders, repair requests and inventory. Paste your Apps Script URL and the staff key (from running <code>setupAdminKey()</code> in Apps Script). They're saved in this browser only.</p>
       <div class="form-group">
         <label>Apps Script URL</label>
         <input type="url" id="sheetsUrlInput" placeholder="https://script.google.com/macros/s/..." style="width:100%" />
       </div>
+      <div class="form-group">
+        <label>Staff Key</label>
+        <input type="password" id="sheetsKeyInput" placeholder="oa-…" autocomplete="off" style="width:100%" />
+      </div>
       <button class="btn-primary" style="width:100%" onclick="saveSheetUrl()">Save & Connect</button>
-      <p style="font-size:.75rem;color:var(--gray-mid);margin-top:1rem;text-align:center">See <code>google-apps-script.js</code> in your project for setup instructions.</p>
+      <p style="font-size:.75rem;color:var(--gray-mid);margin-top:1rem;text-align:center">Setup steps are in the project README → “Google Sheets setup”.</p>
     </div>
   </div>
 </div>
 
 <script src="../js/logo.js"></script>
-<script src="../js/products.js"></script>
 <script src="admin.js"></script>
 
   <!-- ── INVOICE MODAL ── -->
