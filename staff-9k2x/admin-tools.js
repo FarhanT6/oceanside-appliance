@@ -145,6 +145,7 @@ function openProductEditor(id) {
             <span class="hint">Searches the web for new &amp; used prices of this model (about 10–30¢)</span>
             <div id="pePriceOut"></div>
           </div>
+          <label class="af span2 check show-toggle"><input type="checkbox" id="pe-live" ${p.draft ? '' : 'checked'} /> Show on the website <span class="hint">(unchecked = draft, only visible here)</span></label>
           <label class="af span2"><span class="af-label">Storage location <span class="hint">staff only</span></span><input id="pe-location" value="${esc(p.storageLocation)}" placeholder="e.g. Unit A, back row" /></label>
           <label class="af span2"><span class="af-label">Description</span><textarea id="pe-desc" rows="4" placeholder="Size, color, features, any cosmetic marks…">${esc(p.desc)}</textarea></label>
           <label class="af span2"><span class="af-label">Specs <span class="hint">one per line, like “Capacity: 4.5 cu ft”</span></span><textarea id="pe-specs" rows="3" placeholder="Width: 30 in&#10;Color: Stainless">${esc(specsText)}</textarea></label>
@@ -301,6 +302,7 @@ function openProductEditor(id) {
       msrp: parseFloat(val('#pe-msrp')) || 0, refPrice: parseFloat(val('#pe-ref')) || 0,
       storageLocation: val('#pe-location'), desc: val('#pe-desc'), specs,
       imageUrl: photos.join(', '),
+      draft: !m.$('#pe-live').checked,
       stockStatus: stock <= 0 ? 'out' : 'in-stock',
     });
     if (!existing) inv.push(record);
