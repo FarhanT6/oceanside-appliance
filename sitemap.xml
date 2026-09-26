@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://farhant6.github.io/oceanside-appliance/</loc><changefreq>weekly</changefreq></url>
+  <url><loc>https://farhant6.github.io/oceanside-appliance/services/used-appliances.html</loc><changefreq>weekly</changefreq></url>
+  <url><loc>https://farhant6.github.io/oceanside-appliance/services/refrigerator-repair.html</loc><changefreq>weekly</changefreq></url>
+  <url><loc>https://farhant6.github.io/oceanside-appliance/services/washer-repair.html</loc><changefreq>weekly</changefreq></url>
+  <url><loc>https://farhant6.github.io/oceanside-appliance/services/dryer-repair.html</loc><changefreq>weekly</changefreq></url>
+  <url><loc>https://farhant6.github.io/oceanside-appliance/services/dishwasher-repair.html</loc><changefreq>weekly</changefreq></url>
+  <url><loc>https://farhant6.github.io/oceanside-appliance/services/oven-range-repair.html</loc><changefreq>weekly</changefreq></url>
 </urlset>

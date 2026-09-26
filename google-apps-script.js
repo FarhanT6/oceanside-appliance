@@ -13,6 +13,7 @@
 //     POST {type:'admin_pull', key}                         → everything
 //     POST {type:'admin_upsert', key, collection, records}  → add / update rows
 //     POST {type:'admin_delete', key, collection, ids}      → remove rows
+//     POST {type:'admin_upload_image', key, data, mimeType} → saves a photo to Drive
 //
 //   SETUP / UPDATING — see README.md → "Google Sheets setup"
 //   1. Extensions → Apps Script → replace everything with this file → Save
@@ -54,7 +55,7 @@ const COLLECTIONS = {
   sales: {
     sheet: 'Sales', idKey: 'orderId', newestFirst: true,
     cols: [
-      ['Order ID', 'orderId', RO], ['Date', 'timestamp', RO], ['Status', 'status'],
+      ['Order ID', 'orderId', RO], ['Date', 'timestamp', RO], ['Status', 'status'], ['Channel', 'channel'],
       ['First Name', 'firstName'], ['Last Name', 'lastName'], ['Phone', 'phone'], ['Email', 'email'],
       ['Items', 'items', RO], ['Item Count', 'itemCount', RO | INT],
       ['Subtotal ($)', 'subtotal', NUM], ['Tax ($)', 'tax', NUM], ['Delivery Fee ($)', 'deliveryFee', NUM],
@@ -73,7 +74,7 @@ const COLLECTIONS = {
     sheet: 'Repair Requests', idKey: 'ticketId', newestFirst: true,
     cols: [
       ['Ticket ID', 'ticketId', RO], ['Date', 'timestamp', RO], ['Status', 'status'],
-      ['Request Type', 'requestType'], ['First Name', 'firstName'], ['Last Name', 'lastName'],
+      ['Scheduled For', 'scheduledFor'], ['Request Type', 'requestType'], ['First Name', 'firstName'], ['Last Name', 'lastName'],
       ['Phone', 'phone'], ['Email', 'email'], ['Address', 'address'],
       ['Appliance', 'applianceType'], ['Brand', 'brand'], ['Description', 'description'],
       ['Assigned To', 'assignedTo'], ['Internal Notes', 'internalNotes']
@@ -157,6 +158,7 @@ function doPost(e) {
       Object.keys(COLLECTIONS).forEach(name => { out[name] = readCollection(name); });
       return jsonResponse({ success: true, data: out });
     }
+    if (type === 'admin_upload_image') return jsonResponse(uploadImage(data));
     if (type === 'admin_upsert') {
       requireCollection(data.collection);
       return jsonResponse(withLock(() => {
@@ -231,6 +233,7 @@ function placeOrder(d) {
     clientRef: clean(d.clientRef, 60),
     timestamp: new Date().toISOString(),
     status: 'pending',
+    channel: 'Website',
     firstName: firstName, lastName: lastName, phone: phone, email: email,
     fulfillment: fulfillment, address: address,
     availability: clean(d.availability, 200), notes: clean(d.notes, 1000),
@@ -464,6 +467,29 @@ function deleteRecords(name, ids) {
   const drop = {};
   ids.forEach(id => { drop[id] = true; });
   writeCollection(name, readCollection(name).filter(r => !drop[r[def.idKey]]));
+}
+
+// ─── PRODUCT PHOTOS (stored in a Google Drive folder, shared view-only) ───
+function uploadImage(d) {
+  const mime = /^image\/(jpeg|png|webp)$/.test(d.mimeType) ? d.mimeType : 'image/jpeg';
+  let bytes;
+  try { bytes = Utilities.base64Decode(String(d.data || '')); } catch (err) { return fail('Could not read that image.'); }
+  if (!bytes || !bytes.length) return fail('Could not read that image.');
+  if (bytes.length > 10 * 1024 * 1024) return fail('That photo is too large (max 10 MB).');
+  const name = clean(d.filename, 80) || ('photo-' + Date.now() + '.jpg');
+  const file = getPhotoFolder().createFile(Utilities.newBlob(bytes, mime, name));
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const id = file.getId();
+  return { success: true, id: id, url: 'https://lh3.googleusercontent.com/d/' + id + '=w1600' };
+}
+
+function getPhotoFolder() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('PHOTO_FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (err) { /* folder was deleted — make a new one */ } }
+  const folder = DriveApp.createFolder('Oceanside Appliance — Website Photos');
+  props.setProperty('PHOTO_FOLDER_ID', folder.getId());
+  return folder;
 }
 
 // ─── AUTH ───

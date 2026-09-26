@@ -42,13 +42,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Phone number formatting on every phone field ──
   document.querySelectorAll('input[data-phone]').forEach(formatPhoneInput);
 
-  // ── "Sell your appliance" links pre-select the Sell tab ──
-  document.querySelectorAll('[data-sell]').forEach(a => a.addEventListener('click', () => setRequestType('Sell to us')));
+  // ── Links from the service pages: index.html?appliance=washer#repair ──
+  const params = new URLSearchParams(location.search);
+  const presetAppliance = params.get('appliance');
+  if (presetAppliance && document.querySelector(`#rf-type option[value="${CSS.escape(presetAppliance)}"]`)) {
+    document.getElementById('rf-type').value = presetAppliance;
+  }
 
   // ── Repair / sell request form ──
   const form = document.getElementById('repairForm');
   let repairRef = newClientRef();
-  form.querySelectorAll('input[name="requestType"]').forEach(r => r.addEventListener('change', () => setRequestType(r.value)));
 
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -74,9 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!res.success) return showFormError(errEl, res.error || `Something went wrong. Please try again or call ${BUSINESS_PHONE}.`);
 
-    const selling = data.requestType === 'Sell to us';
     document.getElementById('repairSuccessMsg').textContent =
-      `Thanks, ${data.firstName}! We'll call ${data.phone} shortly${selling ? ' with an offer' : ' to schedule your repair'}.` +
+      `Thanks, ${data.firstName}! We'll call ${data.phone} shortly to schedule your repair.` +
       (res.ticketId ? ` Your reference number is ${res.ticketId}.` : '');
     document.getElementById('repairFormContent').hidden = true;
     const success = document.getElementById('repairSuccess');
@@ -87,21 +89,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('repairAgainBtn')?.addEventListener('click', () => {
     form.reset();
     repairRef = newClientRef();
-    setRequestType('Repair');
     document.getElementById('repairFormContent').hidden = false;
     document.getElementById('repairSuccess').classList.remove('show');
     form.firstName.focus();
   });
 });
-
-function setRequestType(type) {
-  const form = document.getElementById('repairForm');
-  const radio = form.querySelector(`input[name="requestType"][value="${type}"]`);
-  if (radio) radio.checked = true;
-  const selling = type === 'Sell to us';
-  document.getElementById('rf-desc-label').textContent = selling ? 'Tell us about the appliance *' : "What's the problem? *";
-  form.description.placeholder = selling
-    ? 'e.g. 5-year-old Samsung French-door fridge, works great, small dent on the side'
-    : 'e.g. Washer won’t drain and makes a grinding noise during the spin cycle';
-  document.getElementById('repairSubmitBtn').querySelector('span').textContent = selling ? 'Get an Offer' : 'Send Request';
-}
