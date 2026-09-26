@@ -36,6 +36,27 @@ function setProducts(list, state) {
   updateHeroPrices();
   applyFilters();
   if (typeof updateCartUI === 'function') updateCartUI();
+  if (state === 'ready') handleDeepLinks();
+}
+
+// Links like index.html?product=ID, ?view=ID or #cart (from product & service pages)
+let deepLinksHandled = false;
+function handleDeepLinks() {
+  if (deepLinksHandled) return;
+  deepLinksHandled = true;
+  const params = new URLSearchParams(location.search);
+  const view = params.get('view'), product = params.get('product');
+  if (view && getProduct(view)) openViewModal(view);
+  else if (product && getProduct(product)) openModal(product);
+  else if (location.hash === '#cart' && typeof openCart === 'function') openCart();
+  if (view || product || location.hash === '#cart') history.replaceState(null, '', location.pathname + (location.hash === '#cart' ? '' : location.hash));
+}
+
+function shareProduct(id) {
+  const p = getProduct(id); if (!p) return;
+  const url = new URL(`product.html?id=${encodeURIComponent(id)}`, location.href).href;
+  if (navigator.share) { navigator.share({ title: p.name, text: `${p.name} — ${money(p.price)}`, url }).catch(() => {}); return; }
+  navigator.clipboard?.writeText(url).then(() => showToast('Link copied'), () => prompt('Copy this link:', url));
 }
 
 function readCache() {
@@ -272,7 +293,12 @@ function openModal(id) {
         <button type="button" class="btn-primary" data-add="${esc(p.id)}" data-close-after ${out ? 'disabled' : ''}>${out ? 'Sold out' : `${icon('cart')}Add to cart`}</button>
         ${!isNew(p) && !out ? `<button type="button" class="btn-outline" data-view="${esc(p.id)}">${icon('eye')}See it in person</button>` : ''}
       </div>
-      <div class="pm-note">${icon('pin')}1016 S Tremont St, Oceanside · <a href="tel:+17607548200">${BUSINESS_PHONE}</a></div>
+      <div class="pp-secondary">
+        <a href="product.html?id=${encodeURIComponent(p.id)}">${icon('external')}Full page</a>
+        <button type="button" data-share="${esc(p.id)}">${icon('share')}Share</button>
+        <a href="tel:+17607548200">${icon('phone')}${BUSINESS_PHONE}</a>
+      </div>
+      <div class="pm-note">${icon('pin')}1016 S Tremont St, Oceanside</div>
     </div>`;
   Modal.open(document.getElementById('modalOverlay'));
 }
@@ -387,6 +413,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (Modal.top()?.id === 'modalOverlay') closeModalDirect();
       openViewModal(view.dataset.view);
     }
+    const share = e.target.closest('[data-share]');
+    if (share) { shareProduct(share.dataset.share); return; }
     const thumb = e.target.closest('.pm-thumbs button');
     if (thumb) {
       document.getElementById('pmMainImg').src = thumb.dataset.src;

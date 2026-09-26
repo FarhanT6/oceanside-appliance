@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="../css/styles.css?v=3" />
-  <link rel="stylesheet" href="admin.css?v=3" />
+  <link rel="stylesheet" href="../css/styles.css?v=5" />
+  <link rel="stylesheet" href="admin.css?v=5" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -19,7 +19,7 @@
   display:flex;align-items:center;justify-content:center;z-index:99999;
   font-family:'Jost',sans-serif;">
   <div style="background:white;border-radius:20px;padding:3rem;width:100%;max-width:420px;margin:1rem;box-shadow:0 32px 80px rgba(0,0,0,0.3);text-align:center;">
-    <div style="font-size:3rem;margin-bottom:1rem;">🌊</div>
+    <img src="../img/logo.svg" alt="" width="64" height="64" style="margin:0 auto 1rem;display:block" />
     <div style="font-family:Georgia,serif;font-size:1.8rem;font-weight:700;color:#1a2e44;margin-bottom:0.4rem;">Oceanside Appliance</div>
     <div style="font-size:0.8rem;color:#8fa3b8;letter-spacing:.12em;text-transform:uppercase;margin-bottom:2rem;">Staff Portal</div>
     <div style="margin-bottom:1.25rem;text-align:left;">
@@ -89,23 +89,23 @@
 
     <nav class="sidebar-nav">
       <a href="#" class="sidebar-link active" data-tab="dashboard" title="Dashboard">
-        <span class="sidebar-icon">📊</span><span class="sidebar-label">Dashboard</span>
+        <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-chart"/></svg></span><span class="sidebar-label">Dashboard</span>
       </a>
       <a href="#" class="sidebar-link" data-tab="sales" title="Sales">
-        <span class="sidebar-icon">💰</span><span class="sidebar-label">Sales</span>
+        <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg></span><span class="sidebar-label">Sales</span>
       </a>
       <a href="#" class="sidebar-link" data-tab="repairs" title="Repair Requests">
-        <span class="sidebar-icon">🔧</span><span class="sidebar-label">Repairs</span>
+        <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-wrench"/></svg></span><span class="sidebar-label">Repairs</span>
       </a>
       <a href="#" class="sidebar-link" data-tab="inventory" title="Inventory">
-        <span class="sidebar-icon">📦</span><span class="sidebar-label">Inventory</span>
+        <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-other"/></svg></span><span class="sidebar-label">Inventory</span>
       </a>
       <div class="sidebar-divider"></div>
       <a href="#" class="sidebar-link" data-tab="ledger" title="Ledger">
-        <span class="sidebar-icon">📒</span><span class="sidebar-label">Ledger</span>
+        <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-book"/></svg></span><span class="sidebar-label">Ledger</span>
       </a>
       <a href="../index.html" class="sidebar-link" title="View Website">
-        <span class="sidebar-icon">🏠</span><span class="sidebar-label">Website</span>
+        <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-store"/></svg></span><span class="sidebar-label">Website</span>
       </a>
     </nav>
 
@@ -123,7 +123,7 @@
       <div class="admin-page-title" id="pageTitle">Dashboard</div>
       <div class="admin-topbar-right">
         <div style="display:flex;gap:.5rem">
-          <button class="btn-sync" id="syncBtn" onclick="pullFromSheets()">🔄 Refresh</button>
+          <button class="btn-sync" id="syncBtn" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
         </div>
         <div class="admin-avatar">OA</div>
       </div>
@@ -133,25 +133,25 @@
     <div class="admin-tab active" id="tab-dashboard">
       <div class="kpi-grid">
         <div class="kpi-card">
-          <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)">💰</div>
+          <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg></div>
           <div class="kpi-value" id="kpi-revenue">$0</div>
           <div class="kpi-label">Total Revenue</div>
           <div class="kpi-change neutral" id="kpi-revenue-sub">Excludes cancelled orders</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)">🛒</div>
+          <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)"><svg class="ic"><use href="../img/icons.svg#i-cart"/></svg></div>
           <div class="kpi-value" id="kpi-orders">0</div>
           <div class="kpi-label">Pending Orders</div>
           <div class="kpi-change neutral" id="kpi-orders-sub"></div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">🔧</div>
+          <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)"><svg class="ic"><use href="../img/icons.svg#i-wrench"/></svg></div>
           <div class="kpi-value" id="kpi-repairs">0</div>
           <div class="kpi-label">Open Repair Requests</div>
           <div class="kpi-change neutral" id="kpi-repairs-sub"></div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-icon" style="background:rgba(192,57,43,0.1);color:var(--danger)">📦</div>
+          <div class="kpi-icon" style="background:rgba(192,57,43,0.1);color:var(--danger)"><svg class="ic"><use href="../img/icons.svg#i-other"/></svg></div>
           <div class="kpi-value" id="kpi-lowstock">0</div>
           <div class="kpi-label">Out of Stock Items</div>
           <div class="kpi-change neutral" id="kpi-lowstock-sub"></div>
@@ -187,7 +187,7 @@
       <!-- Viewing Requests -->
       <div class="admin-card" style="margin-top:1.5rem">
         <div class="card-header">
-          <div class="card-title">👀 Viewing Requests</div>
+          <div class="card-title">Viewing Requests</div>
           <button class="card-btn" onclick="clearViewRequests()">Clear All</button>
         </div>
         <table class="admin-table">
@@ -201,14 +201,16 @@
     <div class="admin-tab" id="tab-sales">
       <div class="admin-card">
         <div class="card-header">
-          <div class="card-title">Sales History</div>
-          <div style="display:flex;gap:.5rem">
-            <button class="card-btn primary" onclick="pullFromSheets()">🔄 Refresh</button>
-            <button class="card-btn" onclick="exportCSV('sales')">📥 Export CSV</button>
+          <div class="card-title">Sales</div>
+          <div class="card-tools">
+            <input type="search" class="table-search" id="salesSearch" placeholder="Search name, phone, item…" oninput="renderSales()" />
+            <button class="card-btn primary" onclick="openRecordSale()"><svg class="ic"><use href="../img/icons.svg#i-plus"/></svg> Record Sale</button>
+            <button class="card-btn primary" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
+            <button class="card-btn" onclick="exportCSV('sales')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> Export CSV</button>
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Date & Time</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Channel</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="salesTbody"></tbody>
         </table>
       </div>
@@ -219,13 +221,14 @@
       <div class="admin-card">
         <div class="card-header">
           <div class="card-title">Repair Requests</div>
-          <div style="display:flex;gap:.5rem">
-            <button class="card-btn primary" onclick="pullFromSheets()">🔄 Refresh</button>
-            <button class="card-btn" onclick="exportCSV('repairs')">📥 Export CSV</button>
+          <div class="card-tools">
+            <input type="search" class="table-search" id="repairsSearch" placeholder="Search name, phone, appliance…" oninput="renderRepairs()" />
+            <button class="card-btn primary" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
+            <button class="card-btn" onclick="exportCSV('repairs')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> Export CSV</button>
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>Ticket ID</th><th>Customer</th><th>Phone</th><th>Appliance</th><th>Brand</th><th>Type</th><th>Request</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Ticket</th><th>Customer</th><th>Phone</th><th>Appliance</th><th>Problem</th><th>Scheduled</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="repairsTbody"></tbody>
         </table>
       </div>
@@ -236,7 +239,7 @@
       <div class="admin-card" style="margin-bottom:1.5rem">
         <div class="card-header">
           <div style="display:flex;align-items:center;gap:1rem">
-            <div class="card-title">💰 Financial Ledger</div>
+            <div class="card-title">Financial Ledger</div>
             <button onclick="showAddRepairRevenueModal()" style="padding:.4rem .9rem;background:var(--success);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:var(--font-body);font-size:.78rem;font-weight:600">+ Add Repair Revenue</button>
           </div>
           <div style="display:flex;gap:.5rem;align-items:center">
@@ -247,30 +250,34 @@
               <option value="month">This Month</option>
               <option value="year">This Year</option>
             </select>
-            <button class="card-btn" onclick="exportLedgerCSV()">⬇ Export CSV</button>
+            <button class="card-btn" onclick="exportLedgerCSV()"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> Export CSV</button>
           </div>
         </div>
         <div class="kpi-grid" style="margin-bottom:1.5rem">
           <div class="kpi-card">
-            <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)">💵</div>
+            <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg></div>
             <div class="kpi-value" id="ledger-revenue">$0</div>
             <div class="kpi-label">Sales Revenue</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)">🛒</div>
+            <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)"><svg class="ic"><use href="../img/icons.svg#i-cart"/></svg></div>
             <div class="kpi-value" id="ledger-orders">0</div>
             <div class="kpi-label">Orders</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)">🔧</div>
+            <div class="kpi-icon" style="background:rgba(201,168,76,0.1);color:var(--gold)"><svg class="ic"><use href="../img/icons.svg#i-wrench"/></svg></div>
             <div class="kpi-value" id="ledger-repair-rev">$0</div>
             <div class="kpi-label">Repair Revenue</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-icon" style="background:rgba(26,111,168,0.08);color:var(--ocean)">🏷</div>
+            <div class="kpi-icon" style="background:rgba(26,111,168,0.08);color:var(--ocean)"><svg class="ic"><use href="../img/icons.svg#i-tag"/></svg></div>
             <div class="kpi-value" id="ledger-total-rev">$0</div>
             <div class="kpi-label">Total Revenue</div>
           </div>
+        </div>
+        <div class="seg-tabs">
+          <button id="ledger-tab-sales" onclick="switchLedgerTab('sales')">Sales</button>
+          <button id="ledger-tab-repairs" onclick="switchLedgerTab('repairs')">Repair revenue</button>
         </div>
         <div id="ledger-panel-sales">
           <table class="admin-table">
@@ -291,109 +298,23 @@
     <div class="admin-tab" id="tab-inventory">
       <div class="admin-card">
         <div class="card-header">
-          <div class="card-title">Inventory Management</div>
-          <div style="display:flex;gap:.75rem;flex-wrap:wrap">
-            <button class="card-btn primary" onclick="showAddProduct()">+ Add Product</button>
-            <button class="card-btn primary" onclick="saveAllInventory()">💾 Save All</button>
-            <button class="card-btn primary" onclick="pullFromSheets()">🔄 Refresh</button>
-            <button class="card-btn" onclick="exportCSV('inventory')">📥 CSV</button>
+          <div class="card-title">Inventory</div>
+          <div class="card-tools">
+            <input type="search" class="table-search" id="inventorySearch" placeholder="Search products…" oninput="renderInventory()" />
+            <button class="card-btn primary" onclick="openProductEditor()"><svg class="ic"><use href="../img/icons.svg#i-plus"/></svg> Add Product</button>
+            <button class="card-btn primary" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save All</button>
+            <button class="card-btn primary" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
+            <button class="card-btn" onclick="exportCSV('inventory')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> CSV</button>
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>ID</th><th>Product</th><th>Category</th><th>Condition</th><th>Storage</th><th>Price ($)</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th></th><th>Product</th><th>Condition</th><th>Location</th><th>Price ($)</th><th>Stock</th><th>Actions</th></tr></thead>
           <tbody id="inventoryTbody"></tbody>
         </table>
       </div>
     </div>
 
   
-    <!-- Add Product Modal -->
-    <div id="addProductModal" style="display:none;position:fixed;inset:0;background:rgba(26,46,68,.5);backdrop-filter:blur(4px);z-index:5000;align-items:center;justify-content:center;padding:1rem">
-      <div style="background:var(--white);border-radius:var(--radius-lg);max-width:520px;width:100%;box-shadow:0 32px 80px rgba(26,46,68,.25);overflow:hidden">
-        <div style="background:var(--navy);padding:1.25rem 1.75rem;display:flex;justify-content:space-between;align-items:center">
-          <div style="font-family:var(--font-display);font-size:1.2rem;font-weight:600;color:var(--white)">Add New Product</div>
-          <button onclick="hideAddProduct()" style="background:rgba(255,255,255,.1);border:none;color:var(--white);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1rem">✕</button>
-        </div>
-        <form id="addProductForm" style="padding:1.75rem" onsubmit="event.preventDefault();submitNewProduct()">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.875rem">
-            <div style="grid-column:1/-1">
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Product Name *</label>
-              <input id="np-name" type="text" placeholder="e.g. Samsung 28 cu ft French Door" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Brand *</label>
-              <input id="np-brand" type="text" placeholder="e.g. Samsung" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Category *</label>
-              <select id="np-category" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;appearance:none;box-sizing:border-box">
-                <option value="">Select…</option>
-                <option value="refrigerator">Refrigerator</option>
-                <option value="washer">Washer</option>
-                <option value="dryer">Dryer</option>
-                <option value="dishwasher">Dishwasher</option>
-                <option value="oven">Oven / Range</option>
-                <option value="microwave">Microwave</option>
-                <option value="freezer">Freezer</option>
-                <option value="vacuum">Vacuum</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Price ($) *</label>
-              <input id="np-price" type="number" placeholder="999" min="0" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Stock Qty *</label>
-              <input id="np-stock" type="number" placeholder="1" min="0" value="1" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Model / SKU</label>
-              <input id="np-model" type="text" placeholder="Optional" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Storage Location</label>
-              <input id="np-location" type="text" placeholder="e.g. Unit A, Warehouse 2" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Condition *</label>
-              <select id="np-condition" required style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;appearance:none;box-sizing:border-box">
-                <option value="New">New (Sealed/Boxed)</option>
-                <option value="New (Open Box)">New (Open Box)</option>
-                <option value="Used - Excellent">Used – Excellent</option>
-                <option value="Used - Good">Used – Good</option>
-                <option value="Used - Fair">Used – Fair</option>
-                <option value="For Parts">For Parts</option>
-              </select>
-            </div>
-            <div style="grid-column:1/-1">
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Description</label>
-              <textarea id="np-desc" placeholder="Brief product description…" rows="2" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;resize:vertical;box-sizing:border-box"></textarea>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">MSRP / Retail Price ($)</label>
-              <input id="np-msrp" type="number" placeholder="e.g. 1299" min="0" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-              <div style="font-size:.68rem;color:var(--gray-mid);margin-top:.25rem">Used to show savings. Leave blank if unknown.</div>
-            </div>
-            <div>
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Competitor / Reference Price ($)</label>
-              <input id="np-refprice" type="number" placeholder="e.g. Lowes $899" min="0" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-              <div style="font-size:.68rem;color:var(--gray-mid);margin-top:.25rem">e.g. current Lowe's / Home Depot price</div>
-            </div>
-            <div style="grid-column:1/-1">
-              <label style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray-dark);display:block;margin-bottom:.4rem">Product Image URL</label>
-              <input id="np-image" type="url" placeholder="https://… (paste image link from Google Drive, Imgur, etc.)" style="width:100%;padding:.7rem .875rem;border:2px solid var(--gray-light);border-radius:8px;font-family:var(--font-body);font-size:.875rem;color:var(--navy);outline:none;box-sizing:border-box"/>
-              <div style="font-size:.68rem;color:var(--gray-mid);margin-top:.25rem">Paste a direct image URL. For multiple images, separate with commas.</div>
-            </div>
-          </div>
-          <div style="display:flex;gap:.75rem;margin-top:1.25rem">
-            <button type="submit" style="flex:1;background:linear-gradient(135deg,var(--ocean),var(--ocean-light));color:var(--white);border:none;padding:.875rem;border-radius:10px;font-family:var(--font-body);font-size:.9rem;font-weight:600;cursor:pointer">Add to Inventory</button>
-            <button type="button" onclick="hideAddProduct()" style="flex:1;background:none;border:2px solid var(--gray-light);color:var(--gray-dark);padding:.875rem;border-radius:10px;font-family:var(--font-body);font-size:.875rem;font-weight:500;cursor:pointer">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
   </main>
 </div>
 
@@ -401,7 +322,7 @@
 <div class="modal-overlay" id="sheetsModal" style="display:none;opacity:1;visibility:visible;pointer-events:all">
   <div class="modal" style="max-width:480px">
     <div class="modal-header">
-      <div class="modal-name" style="font-size:1.3rem">🔗 Connect Google Sheets</div>
+      <div class="modal-name" style="font-size:1.3rem">Connect Google Sheets</div>
       <button class="modal-close" onclick="document.getElementById('sheetsModal').style.display='none'">✕</button>
     </div>
     <div class="modal-body">
@@ -421,7 +342,8 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=3"></script>
+<script src="admin.js?v=5"></script>
+<script src="admin-tools.js?v=5"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

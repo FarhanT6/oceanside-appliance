@@ -14,7 +14,10 @@ This is a production website for an active business. It handles the full custome
 - Browse live inventory with category chips, search, and filters for brand, price and condition (New / Used)
 - Add items to cart and reserve them with a 3-step order request (stock is checked and held on the server)
 - Schedule a viewing appointment for used appliances (View In Person form)
-- Request a repair, or ask for an offer on an appliance you want to sell
+- Request a repair (service pages link straight to the form with the appliance pre-selected)
+- Shareable page for every product (`product.html?id=…`) with Google-friendly product data
+- Service pages for local search: refrigerator, washer, dryer, dishwasher and oven/range repair, plus used appliances
+- FAQ section
 - Map, directions, click-to-call, and a sticky call / repair / cart bar on phones
 - Fully responsive and keyboard-accessible (Escape closes dialogs, focus is trapped in modals)
 
@@ -27,6 +30,12 @@ This is a production website for an active business. It handles the full custome
 - Financial ledger: separate tabs for sales revenue and manual repair revenue entries, date filtering, printable invoices
 - Google Sheets as the database: loads fresh data on open, saves every change, refreshes every minute
 - Cancelling an order automatically returns its items to stock
+- **Product editor** with photo upload straight from your phone (photos are resized and stored in a Google Drive folder)
+- **Marketplace listing** button: ready-to-paste title + description for OfferUp / Facebook Marketplace / Craigslist, with a switch to include or leave out the business name
+- **Record sale** for in-store and marketplace sales — takes the item off the website and adds it to Sales and the Ledger
+- Order and repair detail views with call / text / email / map buttons, internal notes, scheduling and technician
+- Marking a repair Completed offers to log the payment in the Ledger
+- Search on Sales, Repairs and Inventory
 
 ---
 
@@ -64,7 +73,7 @@ This is a production website for an active business. It handles the full custome
 
 1. Open the spreadsheet → **Extensions → Apps Script**.
 2. Replace everything in the editor with the contents of `google-apps-script.js` → **Save**.
-3. In the function dropdown pick **`setupAdminKey`** → **▶ Run** → approve the permissions (it needs Sheets + "send email as you" for owner alerts). Copy the staff key it shows (also in **View → Executions / Logs**).
+3. In the function dropdown pick **`setupAdminKey`** (only needed the first time) → **▶ Run** → approve the permissions (it needs Sheets + "send email as you" for owner alerts). Copy the staff key it shows (also in **View → Executions / Logs**).
 4. **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy.** The web-app URL stays the same.
 5. Open the staff panel → click **Google Sheets** at the bottom of the sidebar → paste the staff key → **Save & Connect**.
    The first time you connect, anything that only existed in that browser (old orders, repairs, ledger entries, product details) is copied up to the Sheet automatically.
@@ -73,6 +82,20 @@ Existing tabs in the old format are read automatically and converted to the new 
 
 To change the key later, run `setupAdminKey()` again and paste the new key into the staff panel.
 
+**After updating the script:** always re-deploy (Deploy → Manage deployments → ✏️ → New version). Photo upload needs Google Drive access, so the first time you update to a version with photo upload, run any function once (e.g. `initialSetup`) and approve the new Drive permission.
+
+---
+
+## Extra pages
+
+`product.html` and everything in `services/` are generated from `index.html`'s header and footer by `tools/build_pages.py`. After changing the header/footer or the service text, run:
+
+```bash
+python3 tools/build_pages.py
+```
+
+**Moving to a custom domain:** set up the domain in GitHub → Settings → Pages, then change `SITE_URL` at the top of `tools/build_pages.py`, update the `canonical`, `og:url`, `og:image` and JSON-LD `url` lines at the top of `index.html`, and `robots.txt`, then re-run the script.
+
 ---
 
 ## Project Structure
@@ -80,6 +103,9 @@ To change the key later, run `setupAdminKey()` again and paste the new key into 
 ```
 oceanside-appliance/
 ├── index.html              — Public website
+├── product.html            — Shareable product page (generated)
+├── services/               — Repair + used-appliance pages (generated)
+├── tools/build_pages.py    — Builds product.html, services/, sitemap.xml
 ├── 404.html                — Not-found page
 ├── css/styles.css          — Design system (shared with the staff panel)
 ├── img/                    — Logo, favicon, social-share image
@@ -88,9 +114,13 @@ oceanside-appliance/
 │   ├── products.js         — Catalog, search, filters, product + viewing modals
 │   ├── cart.js             — Cart
 │   ├── checkout.js         — 3-step order request, EmailJS confirmation
-│   ├── main.js             — Nav, scroll effects, repair / sell form
+│   ├── main.js             — Nav, scroll effects, repair form
+│   ├── site.js             — Nav + cart count on product/service pages
+│   ├── product-page.js     — Product page and "in stock" grids
 │   └── logo.js             — Logo for the staff panel
 ├── staff-9k2x/             — Staff panel (not linked publicly, noindex)
+│   ├── admin.js            — Data sync, dashboard, tables, ledger, invoices
+│   └── admin-tools.js      — Product editor, photos, listings, record sale, detail views
 ├── google-apps-script.js   — Paste into Apps Script (see setup above)
 ├── robots.txt / sitemap.xml
 └── netlify.toml / .htaccess — Security headers (only used if hosted on Netlify / Apache)

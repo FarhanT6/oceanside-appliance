@@ -24,6 +24,20 @@ function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function ic(name) { return `<svg class="ic" aria-hidden="true"><use href="../img/icons.svg#i-${name}"/></svg>`; }
+
+// Case-insensitive "does this record mention the search text" check
+function matches(record, q, fields) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  const digitsQ = q.replace(/\D/g, '');
+  return fields.some(f => {
+    const v = String(record[f] ?? '').toLowerCase();
+    return v.includes(q) || (digitsQ.length >= 3 && v.replace(/\D/g, '').includes(digitsQ));
+  });
+}
+function searchValue(id) { return (document.getElementById(id)?.value || '').trim(); }
+
 // Keep the storefront's cached copy in sync when this browser also browses the shop
 function syncStorefront() {
   localStorage.setItem('oa_products_cache', JSON.stringify({ at: Date.now(), products: getInventory() }));
@@ -232,44 +246,47 @@ function clearViewRequests() {
 }
 
 // ─── SALES ───
+const CHANNEL_LABEL = { Website: 'Website', 'In store': 'In store', OfferUp: 'OfferUp', 'Facebook Marketplace': 'Facebook', Craigslist: 'Craigslist', Other: 'Other' };
+
 function renderSales() {
-  const all   = getSales().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const q = searchValue('salesSearch');
+  const all = getSales()
+    .filter(s => matches(s, q, ['orderId', 'firstName', 'lastName', 'phone', 'email', 'items', 'channel', 'address']))
+    .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
   const active = all.filter(s => s.status !== 'completed' && s.status !== 'cancelled');
   const done   = all.filter(s => s.status === 'completed' || s.status === 'cancelled');
 
   function row(s, faded) {
     const statusColor = s.status === 'pending' ? '#e67e22' : s.status === 'completed' ? '#27ae60' : '#c0392b';
     const id = esc(s.orderId);
-    return `<tr${faded ? ' style="opacity:.65"' : ''}>
-      <td><strong>${id}</strong><br><small style="color:var(--gray-mid)">${esc(s.firstName)} ${esc(s.lastName)} · <a href="tel:${esc(s.phone)}" style="color:inherit">${esc(s.phone)}</a></small></td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.items)}">${esc(s.items)}</td>
+    const who = `${s.firstName || ''} ${s.lastName || ''}`.trim();
+    return `<tr class="clickable${faded ? ' faded' : ''}" onclick="if(!event.target.closest('select,button,a'))openOrderDetail('${id}')">
+      <td><strong>${id}</strong><br><small style="color:var(--gray-mid)">${esc(who) || '—'}${s.phone ? ` · <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ''}</small></td>
+      <td class="wrap" title="${esc(s.items)}">${esc(s.items)}</td>
       <td><strong>$${(s.total||0).toLocaleString()}</strong></td>
+      <td>${esc(CHANNEL_LABEL[s.channel] || s.channel || 'Website')}</td>
       <td>${formatDate(s.timestamp)}</td>
       <td>
-        <select onchange="updateSaleStatus('${id}', this.value)" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .5rem;font-size:.78rem;font-family:var(--font-body);color:${statusColor};font-weight:600">
-          <option ${s.status==='pending'?'selected':''}>pending</option>
-          <option ${s.status==='completed'?'selected':''}>completed</option>
-          <option ${s.status==='cancelled'?'selected':''}>cancelled</option>
+        <select onchange="updateSaleStatus('${id}', this.value)" class="status-select" style="color:${statusColor}">
+          ${['pending','completed','cancelled'].map(st => `<option ${s.status===st?'selected':''}>${st}</option>`).join('')}
         </select>
       </td>
-      <td><button class="action-btn" onclick="deleteSale('${id}')" title="Delete">🗑️</button></td>
+      <td class="row-actions">
+        <button class="action-btn" onclick="openOrderDetail('${id}')" title="Open">${ic('file')}</button>
+        <button class="action-btn danger" onclick="deleteSale('${id}')" title="Delete">${ic('trash')}</button>
+      </td>
     </tr>`;
   }
 
   const sectionHeader = (label, count, color) =>
-    `<tr><td colspan="6" style="background:${color};padding:.5rem 1rem;font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff">${label} (${count})</td></tr>`;
+    `<tr><td colspan="7" class="section-row" style="background:${color}">${label} (${count})</td></tr>`;
 
   let html = '';
-  if (active.length) {
-    html += sectionHeader('🔔 Needs Attention', active.length, '#e67e22');
-    html += active.map(s => row(s, false)).join('');
-  }
-  if (done.length) {
-    html += sectionHeader('✓ Completed / Cancelled', done.length, '#7f8c8d');
-    html += done.map(s => row(s, true)).join('');
-  }
+  if (active.length) html += sectionHeader('Needs attention', active.length, '#e67e22') + active.map(s => row(s, false)).join('');
+  if (done.length)   html += sectionHeader('Completed / cancelled', done.length, '#7f8c8d') + done.map(s => row(s, true)).join('');
   if (!all.length) {
-    html = '<tr><td colspan="6" style="text-align:center;color:var(--gray-mid);padding:2rem">No orders yet.<br><small>Orders will appear here when customers checkout.</small></td></tr>';
+    html = q ? '<tr><td colspan="7" class="empty-row">No sales match your search.</td></tr>'
+             : '<tr><td colspan="7" class="empty-row">No orders yet.<br><small>Website orders appear here automatically. Use “Record Sale” for in-store or marketplace sales.</small></td></tr>';
   }
   document.getElementById('salesTbody').innerHTML = html;
 }
@@ -311,64 +328,45 @@ function deleteSale(orderId) {
 }
 
 // ─── REPAIRS ───
-function openDescModal(ticketId) {
-  const r = getRepairs().find(r => r.ticketId === ticketId);
-  if (!r) return;
-  const overlay = document.createElement('div');
-  overlay.id = 'descModalOverlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
-  overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:2rem;max-width:520px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2);position:relative">
-      <div style="font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ocean);margin-bottom:.5rem">${esc(r.ticketId)} · ${esc(r.firstName)} ${esc(r.lastName)}</div>
-      <div style="font-size:.8rem;color:var(--gray-mid);margin-bottom:1rem">${typeTag(r.requestType)} <span style="text-transform:capitalize">${esc(r.applianceType)}</span> ${r.brand ? '· '+esc(r.brand) : ''}</div>
-      <div style="font-size:.85rem;color:var(--gray-dark);margin-bottom:.75rem">📍 ${esc(r.address)||'—'}<br>📞 <a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>${r.email ? ` · ✉️ <a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ''}</div>
-      <div style="font-size:.95rem;color:var(--navy);line-height:1.65;white-space:pre-wrap;background:var(--off-white);border-radius:8px;padding:1rem 1.25rem">${esc(r.description) || 'No description provided.'}</div>
-      <button onclick="document.getElementById('descModalOverlay').remove()" style="margin-top:1.5rem;width:100%;padding:.75rem;background:var(--ocean);color:#fff;border:none;border-radius:8px;font-family:var(--font-body);font-size:.875rem;font-weight:600;cursor:pointer">Close</button>
-    </div>`;
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  document.body.appendChild(overlay);
-}
+function openDescModal(ticketId) { openRepairDetail(ticketId); }
 
 function renderRepairs() {
-  const all    = getRepairs().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const q = searchValue('repairsSearch');
+  const all = getRepairs()
+    .filter(r => matches(r, q, ['ticketId', 'firstName', 'lastName', 'phone', 'email', 'address', 'applianceType', 'brand', 'description', 'assignedTo']))
+    .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
   const active = all.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled');
   const done   = all.filter(r => r.status === 'Completed' || r.status === 'Cancelled');
 
   function repairRow(r, faded) {
     const id = esc(r.ticketId);
     const desc = r.description || '';
-    return `<tr${faded ? ' style="opacity:.6"' : ''}>
+    return `<tr class="clickable${faded ? ' faded' : ''}" onclick="if(!event.target.closest('select,button,a'))openRepairDetail('${id}')">
       <td><strong>${id}</strong><br><small style="color:var(--gray-mid)">${formatDate(r.timestamp)}</small></td>
-      <td>${esc(r.firstName)} ${esc(r.lastName)}<br><small style="color:var(--gray-mid)">${esc(r.email)}</small></td>
-      <td><a href="tel:${esc(r.phone)}" style="color:inherit">${esc(r.phone)}</a></td>
-      <td style="text-transform:capitalize">${esc(r.applianceType)}</td>
-      <td>${esc(r.brand) || '—'}</td>
-      <td>${typeTag(r.requestType)}</td>
-      <td style="max-width:180px;font-size:.78rem;color:var(--gray-mid);cursor:pointer" title="Click to read the full request" onclick="openDescModal('${id}')">${esc(desc.substring(0,60))}${desc.length>60?'… <span style="color:var(--ocean);font-size:.7rem">more</span>':''}</td>
+      <td>${esc(r.firstName)} ${esc(r.lastName)}<br><small style="color:var(--gray-mid)">${esc(r.address)}</small></td>
+      <td><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></td>
+      <td style="text-transform:capitalize">${esc(r.applianceType)}${r.brand ? `<br><small style="color:var(--gray-mid)">${esc(r.brand)}</small>` : ''}${r.requestType && r.requestType !== 'Repair' ? `<br>${typeTag(r.requestType)}` : ''}</td>
+      <td class="wrap" style="color:var(--gray-dark)">${esc(desc.substring(0, 70))}${desc.length > 70 ? '…' : ''}</td>
+      <td>${r.scheduledFor ? formatDate(r.scheduledFor) : '<span style="color:var(--gray-mid)">—</span>'}</td>
       <td>
-        <select onchange="updateRepairStatus('${id}', this.value)" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .5rem;font-size:.78rem;font-family:var(--font-body)">
+        <select onchange="updateRepairStatus('${id}', this.value)" class="status-select">
           ${['New','Scheduled','In Progress','Completed','Cancelled'].map(st => `<option ${r.status===st?'selected':''}>${st}</option>`).join('')}
         </select>
       </td>
-      <td><button class="action-btn" onclick="deleteRepair('${id}')" title="Delete">🗑️</button></td>
+      <td class="row-actions">
+        <button class="action-btn" onclick="openRepairDetail('${id}')" title="Open">${ic('file')}</button>
+        <button class="action-btn danger" onclick="deleteRepair('${id}')" title="Delete">${ic('trash')}</button>
+      </td>
     </tr>`;
   }
 
   const sectionHeader = (label, count, color) =>
-    `<tr><td colspan="9" style="background:${color};padding:.5rem 1rem;font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff">${label} (${count})</td></tr>`;
+    `<tr><td colspan="8" class="section-row" style="background:${color}">${label} (${count})</td></tr>`;
 
   let html = '';
-  if (active.length) {
-    html += sectionHeader('🔔 Active', active.length, '#e67e22');
-    html += active.map(r => repairRow(r, false)).join('');
-  }
-  if (done.length) {
-    html += sectionHeader('✓ Completed / Cancelled', done.length, '#7f8c8d');
-    html += done.map(r => repairRow(r, true)).join('');
-  }
-  if (!all.length) {
-    html = '<tr><td colspan="9" style="text-align:center;color:var(--gray-mid);padding:2rem">No repair requests yet.</td></tr>';
-  }
+  if (active.length) html += sectionHeader('Active', active.length, '#e67e22') + active.map(r => repairRow(r, false)).join('');
+  if (done.length)   html += sectionHeader('Completed / cancelled', done.length, '#7f8c8d') + done.map(r => repairRow(r, true)).join('');
+  if (!all.length) html = `<tr><td colspan="8" class="empty-row">${q ? 'No repair requests match your search.' : 'No repair requests yet.'}</td></tr>`;
   document.getElementById('repairsTbody').innerHTML = html;
 }
 
@@ -376,10 +374,12 @@ function updateRepairStatus(ticketId, status) {
   const repairs = getRepairs();
   const r = repairs.find(r => r.ticketId === ticketId);
   if (!r) return;
+  const prev = r.status;
   r.status = status;
   setStore('repairs', repairs);
   renderRepairs();
   saveRemote('repairs', [r]);
+  if (status === 'Completed' && prev !== 'Completed') openRepairDetail(ticketId, { askPayment: true });
 }
 
 function deleteRepair(ticketId) {
@@ -391,71 +391,47 @@ function deleteRepair(ticketId) {
 
 // ─── INVENTORY ───
 function renderInventory() {
-  const all     = getInventory();
-  const inStock = all.filter(p => p.stock > 0).sort((a,b) => b.stock - a.stock);
+  const q = searchValue('inventorySearch');
+  const all      = getInventory().filter(p => matches(p, q, ['id', 'name', 'brand', 'model', 'category', 'condition', 'storageLocation']));
+  const inStock  = all.filter(p => p.stock > 0).sort((a,b) => String(a.name).localeCompare(String(b.name)));
   const outStock = all.filter(p => p.stock <= 0);
 
   function row(p) {
-    const isOut = p.stock <= 0;
-    const badge = isOut ? 'cancelled' : 'in-stock';
-    const label = isOut ? 'Out of Stock' : 'In Stock';
-    return `<tr style="${isOut ? 'opacity:.55' : ''}">
-      <td style="font-size:.72rem;color:var(--gray-mid)">${esc(p.id)}</td>
-      <td>
-        <div style="font-weight:600;font-size:.875rem;color:var(--navy)">${esc(p.name)}</div>
-        <div style="font-size:.72rem;color:var(--gray-mid)">${esc(p.brand)}</div>
+    const id = esc(p.id);
+    const img = String(p.imageUrl || '').split(/[\s,]+/).filter(Boolean)[0];
+    return `<tr class="${p.stock <= 0 ? 'faded' : ''}">
+      <td><button class="inv-thumb" onclick="openProductEditor('${id}')" title="Edit / add photos">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : ic('camera')}</button></td>
+      <td class="wrap">
+        <div style="font-weight:600;color:var(--navy)">${esc(p.name)}</div>
+        <div style="font-size:.74rem;color:var(--gray-mid)">${esc([p.brand, p.category, p.model].filter(Boolean).join(' · '))}</div>
       </td>
-      <td style="text-transform:capitalize;font-size:.82rem">${esc(p.category)}</td>
+      <td><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>
+      <td style="color:var(--gray-dark)">${esc(p.storageLocation) || '—'}</td>
+      <td><input type="number" id="price_${id}" value="${esc(p.price)}" min="0" class="mini-input" style="width:84px" /></td>
       <td>
-        <div style="margin-bottom:.25rem">
-          <span id="condLabel_${p.id}" style="display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.65rem;font-weight:700;background:${(p.condition||'').startsWith('New')?'rgba(39,174,96,.15)':'rgba(52,152,219,.12)'};color:${(p.condition||'').startsWith('New')?'#27ae60':'#2980b9'}">${esc(p.condition||'Used - Good')}</span>
-        </div>
-        <select id="cond_${p.id}" onchange="const s=this;const lbl=document.getElementById('condLabel_'+s.dataset.pid);lbl.textContent=s.value;lbl.style.background=s.value.startsWith('New')?'rgba(39,174,96,.15)':'rgba(52,152,219,.12)';lbl.style.color=s.value.startsWith('New')?'#27ae60':'#2980b9'" data-pid="${p.id}" style="border:1px solid var(--gray-light);border-radius:6px;padding:.25rem .4rem;font-size:.72rem;font-family:var(--font-body);color:var(--navy);min-width:120px">
-          ${['New','New (Open Box)','Used - Excellent','Used - Good','Used - Fair','For Parts'].map(c=>`<option value="${c}" ${(p.condition||'Used - Good')===c?'selected':''}>${c}</option>`).join('')}
-        </select>
-      </td>
-      <td>
-        <input type="text" id="loc_${p.id}" value="${esc(p.storageLocation)}" placeholder="e.g. Unit A"
-          style="width:110px;padding:.3rem .4rem;border:1px solid var(--gray-light);border-radius:6px;font-size:.78rem;font-family:var(--font-body);color:var(--navy)"/>
-      </td>
-      <td>
-        <div style="display:flex;align-items:center;gap:.4rem">
-          <span style="font-size:.72rem;color:var(--gray-mid)">$</span>
-          <input type="number" id="price_${p.id}" value="${p.price}" min="0"
-            style="width:70px;padding:.3rem .4rem;border:1px solid var(--gray-light);border-radius:6px;font-size:.82rem;font-family:var(--font-body);color:var(--navy)"/>
+        <div class="stepper">
+          <button onclick="adjustStock('${id}',-1)" aria-label="Less">${ic('minus')}</button>
+          <input type="number" id="stock_${id}" value="${esc(p.stock)}" min="0" class="mini-input" />
+          <button onclick="adjustStock('${id}',1)" aria-label="More">${ic('plus')}</button>
         </div>
       </td>
-      <td>
-        <div style="display:flex;align-items:center;gap:.4rem">
-          <button onclick="adjustStock('${p.id}',-1)" style="width:24px;height:24px;border:1px solid var(--gray-light);background:var(--white);border-radius:5px;cursor:pointer;font-size:.9rem">−</button>
-          <input type="number" id="stock_${p.id}" value="${p.stock}" min="0"
-            style="width:52px;padding:.3rem .4rem;border:1px solid var(--gray-light);border-radius:6px;font-size:.9rem;font-weight:600;text-align:center;font-family:var(--font-body);color:var(--navy)"/>
-          <button onclick="adjustStock('${p.id}',1)" style="width:24px;height:24px;border:1px solid var(--gray-light);background:var(--white);border-radius:5px;cursor:pointer;font-size:.9rem">+</button>
-        </div>
-      </td>
-      <td><span class="status-badge ${badge}">${label}</span></td>
-      <td>
-        <button class="stock-save-btn" onclick="saveInventoryRow('${p.id}')">Save</button>
-        <button onclick="removeProduct('${p.id}')" style="background:none;border:none;cursor:pointer;color:var(--gray-mid);font-size:.9rem;padding:4px;margin-left:2px" title="Remove">🗑️</button>
+      <td class="row-actions">
+        <button class="card-btn small" onclick="saveInventoryRow('${id}')">Save</button>
+        <button class="action-btn" onclick="openProductEditor('${id}')" title="Edit details & photos">${ic('edit')}</button>
+        <button class="action-btn" onclick="openListing('${id}')" title="Marketplace listing">${ic('megaphone')}</button>
+        <button class="action-btn" onclick="openRecordSale('${id}')" title="Record a sale" ${p.stock <= 0 ? 'disabled' : ''}>${ic('dollar')}</button>
+        <button class="action-btn danger" onclick="removeProduct('${id}')" title="Remove">${ic('trash')}</button>
       </td>
     </tr>`;
   }
 
   const sectionHeader = (label, count, color) =>
-    `<tr><td colspan="8" style="background:${color};padding:.5rem 1rem;font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff">${label} (${count})</td></tr>`;
+    `<tr><td colspan="7" class="section-row" style="background:${color}">${label} (${count})</td></tr>`;
 
   let html = '';
-  if (inStock.length) {
-    html += sectionHeader('✅ In Stock', inStock.length, '#1a7fc1');
-    html += inStock.map(row).join('');
-  }
-  if (outStock.length) {
-    html += sectionHeader('⚠️ Sold Out', outStock.length, '#7f8c8d');
-    html += outStock.map(row).join('');
-  }
-  if (!all.length) {
-    html = '<tr><td colspan="8" style="text-align:center;color:var(--gray-mid);padding:2rem">No products yet.<br><small>Add products using the + Add Product button above.</small></td></tr>';
-  }
+  if (inStock.length)  html += sectionHeader('In stock', inStock.length, '#1a7fc1') + inStock.map(row).join('');
+  if (outStock.length) html += sectionHeader('Sold out', outStock.length, '#7f8c8d') + outStock.map(row).join('');
+  if (!all.length) html = `<tr><td colspan="7" class="empty-row">${q ? 'No products match your search.' : 'No products yet.<br><small>Click “Add Product” to list your first appliance.</small>'}</td></tr>`;
   document.getElementById('inventoryTbody').innerHTML = html;
 }
 
@@ -553,49 +529,7 @@ function removeProduct(productId) {
   showAdminToast(`🗑️ ${item.name} removed`);
 }
 
-function showAddProduct() {
-  document.getElementById('addProductModal').style.display = 'flex';
-}
-
-function hideAddProduct() {
-  document.getElementById('addProductModal').style.display = 'none';
-  document.getElementById('addProductForm').reset();
-}
-
-function submitNewProduct() {
-  const get = id => document.getElementById(id)?.value?.trim();
-  const name     = get('np-name');
-  const brand    = get('np-brand');
-  const category = get('np-category');
-  const price    = parseFloat(get('np-price'));
-  const stock    = parseInt(get('np-stock'));
-  const desc     = get('np-desc');
-  const model          = get('np-model') || '';
-  const storageLocation = get('np-location') || '';
-  const condition      = document.getElementById('np-condition')?.value || 'Used - Good';
-  const msrp           = parseFloat(document.getElementById('np-msrp')?.value) || 0;
-  const refPrice       = parseFloat(document.getElementById('np-refprice')?.value) || 0;
-  const imageUrl       = document.getElementById('np-image')?.value.trim() || '';
-  if (!name || !brand || !category || isNaN(price) || isNaN(stock)) {
-    showAdminToast('⚠️ Please fill in all required fields'); return;
-  }
-  const icons = { refrigerator:'🧊', washer:'👕', dryer:'🌀', dishwasher:'🍽️', oven:'🔥', microwave:'📡', freezer:'❄️', vacuum:'🧹', other:'📦' };
-  const newProduct = {
-    id: 'PROD-' + Date.now(), name, brand, category, price, stock, desc,
-    stockStatus: stock <= 0 ? 'out' : 'in-stock',
-    icon: icons[category] || '📦', badge: null, oldPrice: null, _custom: true, specs: {},
-    storageLocation, condition, model, msrp, refPrice, imageUrl
-  };
-  const inv = getStore('inventory');
-  inv.push(newProduct);
-  setStore('inventory', inv);
-  syncStorefront();
-  saveRemote('inventory', [newProduct]);
-  renderInventory();
-  hideAddProduct();
-  showAdminToast(`✅ "${name}" added!`);
-  renderDashboard();
-}
+function showAddProduct() { openProductEditor(); }
 
 // ─── GOOGLE SHEETS SETTINGS ───
 function setSheetsState(state) {
@@ -687,10 +621,8 @@ function deleteRepairRevenue(id) {
 function switchLedgerTab(tab) {
   document.getElementById('ledger-panel-sales').style.display   = tab === 'sales'   ? 'block' : 'none';
   document.getElementById('ledger-panel-repairs').style.display = tab === 'repairs' ? 'block' : 'none';
-  document.getElementById('ledger-tab-sales').style.background   = tab === 'sales'   ? 'var(--ocean)' : 'var(--gray-light)';
-  document.getElementById('ledger-tab-sales').style.color        = tab === 'sales'   ? '#fff' : 'var(--navy)';
-  document.getElementById('ledger-tab-repairs').style.background = tab === 'repairs' ? 'var(--ocean)' : 'var(--gray-light)';
-  document.getElementById('ledger-tab-repairs').style.color      = tab === 'repairs' ? '#fff' : 'var(--navy)';
+  document.getElementById('ledger-tab-sales')?.classList.toggle('active', tab === 'sales');
+  document.getElementById('ledger-tab-repairs')?.classList.toggle('active', tab === 'repairs');
 }
 
 function generateRepairInvoice(id) {
@@ -736,6 +668,7 @@ function generateRepairInvoice(id) {
 }
 
 function renderLedger() {
+  if (!document.querySelector('.seg-tabs button.active')) switchLedgerTab('sales');
   const period     = document.getElementById('ledgerFilter')?.value || 'all';
   const sales      = filterByDate(getSales(), period).sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
   const repairRevs = filterByDate(getRepairRevenue().map(r => ({...r, timestamp: r.timestamp||r.date+'T00:00:00'})), period)
