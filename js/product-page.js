@@ -44,6 +44,7 @@ function cardHtml(p) {
   return `<a class="product-card" href="${pageLink(p)}">
     <div class="product-media">
       ${img ? `<img src="${esc(img)}" alt="${esc(p.name)}" loading="lazy" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}
+      ${p.stockPhotos && img ? '<span class="stock-photo-tag">Stock photo</span>' : ''}
       <div class="product-tags">${p.condition ? `<span class="tag ${isNewCond(p) ? 'new' : 'used'}">${esc(p.condition)}</span>` : ''}</div>
     </div>
     <div class="product-info">
@@ -126,7 +127,9 @@ function renderProduct(failed) {
   wrap.innerHTML = `
     <div class="pp-gallery">
       <div class="pp-main">${imgs.length ? `<img id="ppMainImg" src="${esc(imgs[0])}" alt="${esc(p.name)}" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}
-        ${out ? '<span class="tag out pp-sold">Sold</span>' : ''}</div>
+        ${out ? '<span class="tag out pp-sold">Sold</span>' : ''}
+        ${p.stockPhotos && imgs.length ? '<span class="stock-photo-tag">Stock photo</span>' : ''}</div>
+      ${p.stockPhotos && imgs.length ? `<div class="stock-photo-note">${icon('alert')}Stock photo of this model${isNewCond(p) ? '' : ' — the actual unit is ' + esc(p.condition || 'used') + '. Ask to see it in person.'}</div>` : ''}
       ${imgs.length > 1 ? `<div class="pm-thumbs">${imgs.map((src, i) => `<button type="button" data-src="${esc(src)}" aria-label="Photo ${i + 1}" aria-current="${i === 0}"><img src="${esc(src)}" alt="" loading="lazy" /></button>`).join('')}</div>` : ''}
     </div>
     <div class="pp-info">

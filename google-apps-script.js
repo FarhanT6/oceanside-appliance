@@ -19,12 +19,15 @@
 //     POST {type:'admin_ai_listing', key, productId, …}     → AI: marketplace listing text
 //     POST {type:'admin_ai_price', key, product}            → AI agent: researches prices on the web
 //     POST {type:'admin_ai_group', key, photos}             → AI: groups a batch of photos by appliance
+//     POST {type:'admin_ai_find_images', key, product, refs} → AI agent: finds product images online
+//     POST {type:'admin_import_image', key, url}            → copies an online image into Drive
 //     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //
 //   AI SETUP (optional): Project Settings → Script properties → add
 //   ANTHROPIC_API_KEY = your Claude API key. Then run setupAutomations() once
-//   so new repair requests are diagnosed automatically every 10 minutes and a
-//   morning briefing is emailed every day at 7am (Pacific).
+//   so new repair requests are diagnosed automatically every 10 minutes, products
+//   without website images get them found automatically, and a morning briefing
+//   is emailed every day at 7am (Pacific).
 //
 //   SETUP / UPDATING — see README.md → "Google Sheets setup"
 //   1. Extensions → Apps Script → replace everything with this file → Save
@@ -53,7 +56,8 @@ const COLLECTIONS = {
       ['Category', 'category'], ['Condition', 'condition'], ['Model', 'model'],
       ['Our Price ($)', 'price', NUM], ['MSRP ($)', 'msrp', NUM], ['Competitor Price ($)', 'refPrice', NUM],
       ['Stock Qty', 'stock', INT], ['Storage Location', 'storageLocation'],
-      ['Image URL(s)', 'imageUrl'], ['Description', 'desc'], ['Last Updated', 'updatedAt', RO]
+      ['Image URL(s)', 'imageUrl'], ['Inventory Photos (staff)', 'internalPhotos'],
+      ['Description', 'desc'], ['Last Updated', 'updatedAt', RO]
     ],
     legacy: {
       'Product ID': 'id', 'Product Name': 'name', 'Brand / Manufacturer': 'brand', 'Brand': 'brand',
@@ -127,7 +131,7 @@ const COLLECTIONS = {
 };
 
 const PUBLIC_PRODUCT_FIELDS = ['id', 'name', 'brand', 'category', 'condition', 'model', 'price', 'msrp',
-  'refPrice', 'stock', 'imageUrl', 'desc', 'specs', 'badge', 'badgeText', 'oldPrice'];
+  'refPrice', 'stock', 'imageUrl', 'stockPhotos', 'desc', 'specs', 'badge', 'badgeText', 'oldPrice'];
 
 // ─── GET ───
 function doGet(e) {
@@ -175,6 +179,8 @@ function doPost(e) {
     if (type === 'admin_ai_listing')   return jsonResponse(aiListing(data));
     if (type === 'admin_ai_price')     return jsonResponse(aiPriceResearch(data));
     if (type === 'admin_ai_group')     return jsonResponse(aiGroupPhotos(data));
+    if (type === 'admin_ai_find_images') return jsonResponse({ success: true, candidates: findProductImages(data.product || {}, data.refs || []) });
+    if (type === 'admin_import_image') return jsonResponse(importImageFromUrl(data.url, data.name));
     if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_upsert') {
       requireCollection(data.collection);
@@ -500,6 +506,23 @@ function uploadImage(d) {
   return { success: true, id: id, url: 'https://lh3.googleusercontent.com/d/' + id + '=w1600' };
 }
 
+// Copy an image from the web into our Drive folder (so it never breaks or hotlinks)
+function importImageFromUrl(url, name) {
+  if (!/^https?:\/\//i.test(String(url || ''))) return fail('Invalid image link.');
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': BROWSER_UA } });
+  if (res.getResponseCode() !== 200) return fail('Could not download that image (' + res.getResponseCode() + ').');
+  const blob = res.getBlob();
+  const type = String(blob.getContentType() || '').split(';')[0];
+  if (!/^image\/(jpeg|png|webp|gif)$/.test(type)) return fail('That link is not a supported image.');
+  const bytes = blob.getBytes();
+  if (bytes.length > 10 * 1024 * 1024) return fail('That image is too large.');
+  const ext = type.split('/')[1].replace('jpeg', 'jpg');
+  const file = getPhotoFolder().createFile(Utilities.newBlob(bytes, type, (clean(name, 60) || 'product') + '-' + Date.now() + '.' + ext));
+  file.setDescription('Source: ' + url);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return { success: true, url: 'https://lh3.googleusercontent.com/d/' + file.getId() + '=w1600', source: url };
+}
+
 function getPhotoFolder() {
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('PHOTO_FOLDER_ID');
@@ -662,6 +685,158 @@ function aiListing(d) {
       (d.asIs ? '\nFinish with the line: Sold as-is.' : '') }]
   });
   return { success: true, title: String(result.title || '').slice(0, 100), body: String(result.body || '') };
+}
+
+// ─── PRODUCT IMAGE FINDER ───
+// 1. Claude web-searches for this exact model's product pages (manufacturer first).
+// 2. We read the main product images off those pages (og:image / JSON-LD).
+// 3. Claude compares each candidate with our own photo of the unit and the
+//    product facts: same model? same color? clean product shot?
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+const MAKER_DOMAINS = ['lg.com', 'samsung.com', 'whirlpool.com', 'geappliances.com', 'maytag.com', 'bosch-home.com', 'kitchenaid.com',
+  'frigidaire.com', 'electrolux.com', 'electroluxappliances.com', 'amana.com', 'jennair.com', 'miele.com', 'thermador.com', 'cafeappliances.com', 'hotpoint.com'];
+
+function hostOf(u) { const m = /^https?:\/\/([^\/?#]+)/i.exec(u || ''); return m ? m[1].toLowerCase().replace(/^www\./, '') : ''; }
+function isMaker(u) { const h = hostOf(u); return MAKER_DOMAINS.some(d => h === d || h.endsWith('.' + d)); }
+
+function extractPageImages(html, pageUrl) {
+  const out = [];
+  const origin = (/^https?:\/\/[^\/]+/i.exec(pageUrl) || [''])[0];
+  const push = u => {
+    if (!u || typeof u !== 'string') return;
+    u = u.replace(/&amp;/g, '&').trim();
+    if (u.indexOf('//') === 0) u = 'https:' + u;
+    else if (u.charAt(0) === '/') u = origin + u;
+    if (/^https?:\/\//i.test(u) && !/\.svg(\?|$)/i.test(u) && out.indexOf(u) < 0) out.push(u);
+  };
+  let m;
+  const metaRe = /<meta\b[^>]*(?:property|name)\s*=\s*["'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["'][^>]*>/gi;
+  while ((m = metaRe.exec(html))) { const c = /content\s*=\s*["']([^"']+)["']/i.exec(m[0]); if (c) push(c[1]); }
+  const ldRe = /<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi;
+  const walk = node => {
+    if (!node) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== 'object') return;
+    const t = [].concat(node['@type'] || []);
+    if (t.indexOf('Product') >= 0 && node.image) [].concat(node.image).forEach(i => push(typeof i === 'string' ? i : (i && (i.url || i.contentUrl))));
+    if (node['@graph']) walk(node['@graph']);
+  };
+  while ((m = ldRe.exec(html))) { try { walk(JSON.parse(m[1].trim())); } catch (err) { /* ignore bad JSON-LD */ } }
+  return out.slice(0, 5);
+}
+
+function findProductImages(p, refs) {
+  const brand = clean(p.brand, 60), model = clean(p.model, 60), name = clean(p.name, 150), desc = clean(p.desc, 400);
+  if (!model && !name) throw new Error('Add a model number or product name first.');
+
+  // 1. Search for product pages
+  const messages = [{ role: 'user', content:
+    `Find product pages for this exact appliance so we can use its official product photos.\n` +
+    `Brand: ${brand || 'unknown'}\nModel number: ${model || 'unknown'}\nName: ${name}\n${desc ? 'Notes (may mention color/finish): ' + desc + '\n' : ''}\n` +
+    `Prefer the manufacturer's own product page for this exact model number, then major retailers (Home Depot, Lowe's, Best Buy, AJ Madison, Abt). ` +
+    `Match the color/finish if the model number encodes it. Reply with up to 6 product page URLs, one per line, best first, and nothing else.` }];
+  const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 4 }];
+  let text = '', sources = [];
+  for (let i = 0; i < 4; i++) {
+    const json = claudeRequest({ max_tokens: 8000, thinking: { type: 'adaptive' }, output_config: { effort: 'low' }, tools: tools, messages: messages,
+      system: 'You locate official product pages for appliances. Only return URLs of pages about the exact model requested.' });
+    (json.content || []).forEach(b => {
+      if (b.type === 'text') text += '\n' + b.text;
+      if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) b.content.forEach(r => { if (r.url) sources.push(r.url); });
+    });
+    if (json.stop_reason !== 'pause_turn') break;
+    messages.push({ role: 'assistant', content: json.content });
+  }
+  const fromText = (text.match(/https?:\/\/[^\s)<>"'\]]+/g) || []).map(u => u.replace(/[.,;]+$/, ''));
+  const known = {}; sources.forEach(u => { known[hostOf(u)] = true; });
+  let pages = fromText.filter(u => known[hostOf(u)]).concat(sources);
+  pages = pages.filter((u, i) => pages.indexOf(u) === i);
+  pages.sort((a, b) => isMaker(b) - isMaker(a));
+  pages = pages.slice(0, 6);
+  if (!pages.length) return [];
+
+  // 2. Read the main images off each page
+  const pageRes = UrlFetchApp.fetchAll(pages.map(u => ({ url: u, muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'en-US,en' } })));
+  let cands = [];
+  pageRes.forEach((r, i) => {
+    if (r.getResponseCode() !== 200) return;
+    extractPageImages(r.getContentText().slice(0, 1500000), pages[i]).forEach(img => cands.push({ imageUrl: img, pageUrl: pages[i], source: hostOf(pages[i]) }));
+  });
+  const seenImg = {};
+  cands = cands.filter(c => !seenImg[c.imageUrl] && (seenImg[c.imageUrl] = true)).slice(0, 8);
+  if (!cands.length) return [];
+
+  // 3. Download candidates and let Claude compare them with our unit
+  const imgRes = UrlFetchApp.fetchAll(cands.map(c => ({ url: c.imageUrl, muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': BROWSER_UA } })));
+  const usable = [];
+  imgRes.forEach((r, i) => {
+    if (r.getResponseCode() !== 200) return;
+    const blob = r.getBlob();
+    const type = String(blob.getContentType() || '').split(';')[0];
+    const bytes = blob.getBytes();
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(type) || bytes.length < 5000 || bytes.length > 5 * 1024 * 1024) return;
+    usable.push(Object.assign({}, cands[i], { block: { type: 'image', source: { type: 'base64', media_type: type, data: Utilities.base64Encode(bytes) } } }));
+  });
+  if (!usable.length) return [];
+
+  const content = [];
+  const refBlocks = (refs || []).slice(0, 2).map(imageBlock).filter(Boolean);
+  refBlocks.forEach((b, i) => { content.push({ type: 'text', text: `Our unit — photo ${i + 1}:` }); content.push(b); });
+  usable.forEach((c, i) => { content.push({ type: 'text', text: `Candidate ${i} (from ${c.source}):` }); content.push(c.block); });
+  content.push({ type: 'text', text: `We are listing: ${brand} ${name}${model ? ' — model ' + model : ''}. ${desc}\nJudge every candidate.` });
+  const verdict = callClaude({
+    effort: 'low',
+    schema: strictObject({ candidates: { type: 'array', items: strictObject({
+      index: { type: 'integer' },
+      sameModel: { type: 'string', enum: ['yes', 'likely', 'unsure', 'no'] },
+      colorMatches: { type: 'string', enum: ['yes', 'unsure', 'no'] },
+      cleanProductShot: { type: 'boolean', description: 'Clear photo of the appliance itself on a plain background (not a logo, lifestyle collage, banner or text graphic).' },
+      note: { type: 'string' }
+    }) } }),
+    system: 'You check whether online product images show the same appliance a store is listing. ' +
+      'Compare the product type, design, handles, controls, door style and color/finish with our unit photos (if given) and the product facts. ' +
+      'Be strict: a different model family or a different finish is "no".',
+    content: content
+  });
+  const rank = { yes: 3, likely: 2, unsure: 1, no: 0 };
+  return (verdict.candidates || [])
+    .filter(v => usable[v.index] && v.sameModel !== 'no' && v.colorMatches !== 'no')
+    .map(v => ({
+      imageUrl: usable[v.index].imageUrl, pageUrl: usable[v.index].pageUrl, source: usable[v.index].source,
+      maker: isMaker(usable[v.index].pageUrl), sameModel: v.sameModel, colorMatches: v.colorMatches, clean: v.cleanProductShot, note: v.note,
+      score: rank[v.sameModel] * 2 + (v.colorMatches === 'yes' ? 2 : 0) + (v.cleanProductShot ? 2 : 0) + (isMaker(usable[v.index].pageUrl) ? 1 : 0)
+    }))
+    .sort((a, b) => b.score - a.score);
+}
+
+// ▶ Runs every 15 minutes once setupAutomations() has been run:
+// finds website images for products that don't have any yet (4 per run).
+function autoFindImages() {
+  if (!PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY')) return;
+  const todo = readCollection('inventory')
+    .filter(p => !String(p.imageUrl || '').trim() && !p.imageSearchAt && (p.model || p.name))
+    .slice(0, 4);
+  todo.forEach(p => {
+    const update = { id: p.id, imageSearchAt: new Date().toISOString() };
+    try {
+      const refs = String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean);
+      const picks = findProductImages(p, refs)
+        .filter(c => (c.sameModel === 'yes' || c.sameModel === 'likely') && c.colorMatches !== 'no' && c.clean)
+        .slice(0, 3);
+      const saved = picks.map(c => importImageFromUrl(c.imageUrl, p.model || p.name)).filter(r => r.success);
+      if (saved.length) {
+        update.imageUrl = saved.map(r => r.url).join(', ');
+        update.stockPhotos = true;
+        update.imagesAutoPicked = true;
+        update.imageSources = picks.map(c => c.pageUrl).join(' ');
+      } else {
+        update.imageSearchNote = 'No matching product images found online.';
+      }
+    } catch (err) {
+      update.imageSearchNote = String(err && err.message || err).slice(0, 200);
+    }
+    withLock(() => upsertRecords('inventory', [update]));
+  });
 }
 
 // ─── PHOTO GROUPING (bulk import) ───
@@ -925,11 +1100,12 @@ function autoTriageRepairs() {
 // ▶ Run once from the editor to turn on the automations (safe to run again).
 function setupAutomations() {
   ScriptApp.getProjectTriggers()
-    .filter(t => ['autoTriageRepairs', 'sendDailyBriefing'].indexOf(t.getHandlerFunction()) >= 0)
+    .filter(t => ['autoTriageRepairs', 'sendDailyBriefing', 'autoFindImages'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('autoTriageRepairs').timeBased().everyMinutes(10).create();
   ScriptApp.newTrigger('sendDailyBriefing').timeBased().everyDays(1).atHour(7).inTimezone('America/Los_Angeles').create();
-  Logger.log('On: repair diagnosis every 10 minutes, morning briefing daily at 7am Pacific.');
+  ScriptApp.newTrigger('autoFindImages').timeBased().everyMinutes(15).create();
+  Logger.log('On: repair diagnosis every 10 min, website image finder every 15 min, morning briefing daily at 7am Pacific.');
 }
 
 // ─── AUTH ───

@@ -100,7 +100,7 @@ function openBulkImport() {
     <div class="bi-pick">
       ${ic('camera')}
       <h3>Choose all the photos you want to add</h3>
-      <p>Select them in one go — phone camera roll or a computer folder. They'll be sorted by when they were taken, grouped by appliance, and the model number is read from whichever photo shows the sticker or box label.</p>
+      <p>Select them in one go — phone camera roll or a computer folder. They'll be sorted by when they were taken, grouped by appliance, and the model number is read from whichever photo shows the sticker or box label. These photos stay private (inventory only) — customers see product images found online.</p>
       <label class="upload-btn">${ic('camera')}<span>Choose photos</span><input type="file" id="biFiles" accept="image/*" multiple hidden /></label>
       <p class="hint">Tip: photograph the model sticker or box label for each appliance. Up to about 200 photos at a time works well.</p>
     </div>`;
@@ -347,7 +347,7 @@ function openBulkImport() {
         name: g.f.name || g.looksLike, brand: g.f.brand, model: g.f.model, category: g.f.category,
         condition: g.f.condition, price, msrp: parseFloat(g.f.msrp) || 0, refPrice: 0,
         stock: Math.max(1, parseInt(g.f.stock, 10) || 1), desc: g.f.desc, specs: g.f.specs || {},
-        imageUrl: urls.join(', '), storageLocation: '',
+        imageUrl: '', internalPhotos: urls.join(', '), storageLocation: '',
         draft: !(publish && price > 0),
       };
     });
@@ -358,7 +358,7 @@ function openBulkImport() {
     renderInventory(); renderDashboard();
     const live = records.filter(r => !r.draft).length, drafts = records.length - live;
     m.close();
-    showAdminToast(`✅ Added ${records.length} appliance${records.length === 1 ? '' : 's'}${live ? ` · ${live} live on the website` : ''}${drafts ? ` · ${drafts} saved as draft${drafts === 1 ? '' : 's'}` : ''}`);
+    showAdminToast(`✅ Added ${records.length} appliance${records.length === 1 ? '' : 's'}${live ? ` · ${live} live` : ''}${drafts ? ` · ${drafts} draft${drafts === 1 ? '' : 's'}` : ''} — website images will be found automatically (about 4 every 15 min)`);
   }
   m.$('#biDrafts').addEventListener('click', () => save(false));
   m.$('#biPublish').addEventListener('click', () => save(true));

@@ -12,7 +12,7 @@ import html, json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SITE_URL = 'https://farhant6.github.io/oceanside-appliance/'
-VERSION = '5'  # bump to make browsers fetch fresh CSS/JS
+VERSION = '6'  # bump to make browsers fetch fresh CSS/JS
 
 index = (ROOT / 'index.html').read_text()
 sprite = index[index.index('<!-- ======== ICON SPRITE'):index.index('<!-- ======== NAVBAR')]

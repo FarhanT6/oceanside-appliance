@@ -255,6 +255,11 @@ a { color: var(--ocean); }
 .stock-dot.low { background: var(--gold); box-shadow: 0 0 0 3px rgba(201,168,76,.18); }
 .stock-dot.out { background: var(--danger); box-shadow: none; }
 
+.stock-photo-tag { position: absolute; right: .6rem; bottom: .6rem; background: rgba(26,46,68,.72); color: #fff; font-size: .66rem; font-weight: 600; letter-spacing: .03em; padding: .18rem .5rem; border-radius: 999px; pointer-events: none; }
+.product-media img, .pm-main img, .pp-main img { background: #fff; }
+.stock-photo-note { display: flex; gap: .45rem; align-items: flex-start; font-size: .8rem; color: var(--gray-dark); background: var(--off-white); padding: .55rem .8rem; line-height: 1.45; }
+.stock-photo-note .ic { color: var(--ocean); margin-top: .1em; flex-shrink: 0; }
+
 /* skeletons + empty states */
 .skeleton { pointer-events: none; animation: none; }
 .skeleton .product-media, .skeleton .sk { background: linear-gradient(90deg, var(--gray-light) 0%, #f3f7fb 50%, var(--gray-light) 100%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; }

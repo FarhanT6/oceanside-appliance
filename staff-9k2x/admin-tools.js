@@ -105,7 +105,8 @@ async function uploadPhoto(file) {
 function openProductEditor(id) {
   const existing = id ? getStore('inventory').find(p => p.id === id) : null;
   const p = existing || { condition: 'Used - Good', stock: 1, category: '' };
-  let photos = imagesOf(p);
+  let photos = String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean); // staff-only inventory photos
+  let web = imagesOf(p);                                                       // images customers see
   let uploading = 0;
   const specsText = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {}).map(([k, v]) => `${k}: ${v}`).join('\n');
 
@@ -116,7 +117,20 @@ function openProductEditor(id) {
     body: `
       <div class="pe-layout">
         <div class="pe-photos">
-          <div class="af-label">Photos <span class="hint">First photo is the cover</span></div>
+          <div class="pe-sec">
+            <div class="af-label">Website images <span class="hint">what customers see · first is the cover</span></div>
+            ${p.imagesAutoPicked ? `<div class="ai-note">${ic('sparkles')}<span>These were picked automatically — check they match, then save.</span></div>` : ''}
+            <div class="photo-grid" id="peWeb"></div>
+            <button type="button" class="ai-btn" id="peFind">${ic('search')}<span>Find product images online</span></button>
+            <div id="peFindOut"></div>
+            <div class="link-add">
+              <input type="url" id="peLink" placeholder="…or paste an image link" />
+              <button type="button" class="card-btn small" id="peLinkAdd">Add</button>
+            </div>
+            <label class="check-line"><input type="checkbox" id="pe-stocklabel" ${p.stockPhotos ? 'checked' : ''} /> Show a “Stock photo” label on the website</label>
+          </div>
+          <div class="pe-sec">
+          <div class="af-label">Inventory photos <span class="hint">staff only · never shown on the website</span></div>
           <div class="photo-grid" id="peGrid"></div>
           <label class="upload-btn">
             ${ic('camera')}<span>Take or choose photos</span>
@@ -125,9 +139,6 @@ function openProductEditor(id) {
           <div class="upload-status" id="peStatus" hidden></div>
           <button type="button" class="ai-btn" id="peAI">${ic('sparkles')}<span>Fill in details from photos</span></button>
           <div class="ai-note" id="peAINote" hidden></div>
-          <div class="link-add">
-            <input type="url" id="peLink" placeholder="…or paste an image link" />
-            <button type="button" class="card-btn small" id="peLinkAdd">Add</button>
           </div>
         </div>
         <div class="af-grid">
@@ -166,22 +177,82 @@ function openProductEditor(id) {
         <img src="${esc(u)}" alt="" />
         ${i === 0 ? '<span class="cover">Cover</span>' : ''}
         <div class="tile-actions">
-          <button type="button" data-move="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move left">${ic('chevron-left')}</button>
           <button type="button" data-remove="${i}" aria-label="Remove photo">${ic('x')}</button>
-          <button type="button" data-move="${i}" data-dir="1" ${i === photos.length - 1 ? 'disabled' : ''} aria-label="Move right">${ic('chevron-right')}</button>
+          <button type="button" data-toweb="${i}" title="Also use this photo on the website" aria-label="Use on website">${ic('store')}</button>
         </div>
       </div>`).join('') + (uploading ? Array.from({ length: uploading }, () => '<div class="photo-tile loading"><span class="spin"></span></div>').join('') : '')
-      || '<div class="photo-empty">No photos yet — listings with photos sell much faster.</div>';
+      || '<div class="photo-empty">Add your own photos here — including the model sticker — for inventory and for reading the details.</div>';
+  }
+  const webGrid = m.$('#peWeb');
+  function renderWeb() {
+    webGrid.innerHTML = web.map((u, i) => `
+      <div class="photo-tile">
+        <img src="${esc(u)}" alt="" />
+        ${i === 0 ? '<span class="cover">Cover</span>' : ''}
+        <div class="tile-actions">
+          <button type="button" data-move="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move left">${ic('chevron-left')}</button>
+          <button type="button" data-remove="${i}" aria-label="Remove image">${ic('x')}</button>
+          <button type="button" data-move="${i}" data-dir="1" ${i === web.length - 1 ? 'disabled' : ''} aria-label="Move right">${ic('chevron-right')}</button>
+        </div>
+      </div>`).join('') || '<div class="photo-empty">No website images yet — use “Find product images online”.</div>';
   }
   renderPhotos();
+  renderWeb();
+  webGrid.addEventListener('click', e => {
+    const mv = e.target.closest('[data-move]');
+    if (mv) { const i = +mv.dataset.move, j = i + +mv.dataset.dir; [web[i], web[j]] = [web[j], web[i]]; return renderWeb(); }
+    const rm = e.target.closest('[data-remove]');
+    if (rm) { web.splice(+rm.dataset.remove, 1); renderWeb(); }
+  });
+
+  m.$('#peFind').addEventListener('click', async () => {
+    const product = { name: m.$('#pe-name').value.trim(), brand: m.$('#pe-brand').value.trim(), model: m.$('#pe-model').value.trim(), desc: m.$('#pe-desc').value.trim() };
+    if (!product.model && !product.name) return showAdminToast('⚠️ Enter the model number or name first (or use “Fill in details from photos”)');
+    const btn = m.$('#peFind'), out = m.$('#peFindOut');
+    btn.disabled = true; btn.classList.add('busy'); btn.querySelector('span').textContent = 'Searching product pages… (up to a minute)';
+    out.innerHTML = '';
+    try {
+      const { candidates } = await apiPost('admin_ai_find_images', { product, refs: photos.slice(0, 2) });
+      if (!candidates.length) { out.innerHTML = `<div class="ai-err">No matching product images found. Try adding the exact model number, or paste an image link.</div>`; return; }
+      const picked = new Set(candidates.map((c, i) => i).filter(i => candidates[i].clean && candidates[i].sameModel !== 'unsure').slice(0, 3));
+      const draw = () => {
+        out.innerHTML = `
+          <div class="find-grid">${candidates.map((c, i) => `
+            <button type="button" class="find-tile${picked.has(i) ? ' on' : ''}" data-pick="${i}" title="${esc(c.note)}">
+              <img src="${esc(c.imageUrl)}" alt="" referrerpolicy="no-referrer" />
+              <span class="find-src">${c.maker ? '★ ' : ''}${esc(c.source)}</span>
+              <span class="find-verdict ${esc(c.sameModel)}">${{ yes: 'Same model', likely: 'Likely match', unsure: 'Check' }[c.sameModel] || ''}${c.colorMatches === 'yes' ? ' · color ✓' : ''}</span>
+              <span class="find-check">${ic('check')}</span>
+            </button>`).join('')}</div>
+          <div class="find-actions"><span class="hint">★ = manufacturer's site (preferred). Tap to select.</span>
+            <button type="button" class="card-btn small primary" id="peUsePicked" ${picked.size ? '' : 'disabled'}>Use ${picked.size || ''} selected</button></div>`;
+      };
+      draw();
+      out.onclick = async e => {
+        const t = e.target.closest('[data-pick]');
+        if (t) { const i = +t.dataset.pick; picked.has(i) ? picked.delete(i) : picked.add(i); return draw(); }
+        if (e.target.closest('#peUsePicked')) {
+          const use = [...picked].map(i => candidates[i]);
+          const b2 = m.$('#peUsePicked'); b2.disabled = true; b2.textContent = 'Saving images…';
+          let ok = 0;
+          for (const c of use) {
+            try { const r = await apiPost('admin_import_image', { url: c.imageUrl, name: product.model || product.name }); web.push(r.url); ok++; renderWeb(); }
+            catch (err) { console.warn(err); }
+          }
+          if (ok) m.$('#pe-stocklabel').checked = true;
+          out.innerHTML = ok ? `<div class="ai-note">${ic('check')}<span>Added ${ok} image${ok > 1 ? 's' : ''}. Save to keep them.</span></div>` : `<div class="ai-err">Couldn't download those images — the site may block it. Try others or paste a link.</div>`;
+        }
+      };
+    } catch (err) {
+      if (err.code === 'unauthorized') handleApiError(err, 'AI'); else out.innerHTML = `<div class="ai-err">⚠️ ${esc(err.message)}</div>`;
+    } finally {
+      btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('span').textContent = 'Find product images online';
+    }
+  });
 
   grid.addEventListener('click', e => {
-    const mv = e.target.closest('[data-move]');
-    if (mv) {
-      const i = +mv.dataset.move, j = i + +mv.dataset.dir;
-      [photos[i], photos[j]] = [photos[j], photos[i]];
-      return renderPhotos();
-    }
+    const tw = e.target.closest('[data-toweb]');
+    if (tw) { const u = photos[+tw.dataset.toweb]; if (!web.includes(u)) { web.push(u); renderWeb(); showAdminToast('✅ Added to website images'); } return; }
     const rm = e.target.closest('[data-remove]');
     if (rm) { photos.splice(+rm.dataset.remove, 1); renderPhotos(); }
   });
@@ -208,12 +279,12 @@ function openProductEditor(id) {
   });
 
   m.$('#peAI').addEventListener('click', async () => {
-    if (!photos.length) return showAdminToast('⚠️ Add a photo first — include the model sticker if you can');
+    if (!photos.length && !web.length) return showAdminToast('⚠️ Add a photo first — include the model sticker if you can');
     const btn = m.$('#peAI'), note = m.$('#peAINote');
     btn.disabled = true; btn.classList.add('busy'); btn.querySelector('span').textContent = 'Looking at your photos…';
     try {
       const hints = { name: m.$('#pe-name').value, brand: m.$('#pe-brand').value, model: m.$('#pe-model').value, category: m.$('#pe-category').value };
-      const { suggestion: s } = await apiPost('admin_ai_product', { images: photos.slice(0, 4), hints });
+      const { suggestion: s } = await apiPost('admin_ai_product', { images: [...photos, ...web].slice(0, 4), hints });
       const filled = [];
       const put = (sel, val) => {
         const el = m.$(sel);
@@ -279,7 +350,7 @@ function openProductEditor(id) {
   m.$('#peLinkAdd').addEventListener('click', () => {
     const v = m.$('#peLink').value.trim();
     if (!/^https?:\/\//i.test(v)) return showAdminToast('⚠️ Paste a full link starting with https://');
-    photos.push(v); m.$('#peLink').value = ''; renderPhotos();
+    web.push(v); m.$('#peLink').value = ''; renderWeb();
   });
 
   m.$('#peSave').addEventListener('click', () => {
@@ -301,7 +372,10 @@ function openProductEditor(id) {
       condition: val('#pe-condition'), model: val('#pe-model'),
       msrp: parseFloat(val('#pe-msrp')) || 0, refPrice: parseFloat(val('#pe-ref')) || 0,
       storageLocation: val('#pe-location'), desc: val('#pe-desc'), specs,
-      imageUrl: photos.join(', '),
+      imageUrl: web.join(', '),
+      internalPhotos: photos.join(', '),
+      stockPhotos: web.length > 0 && m.$('#pe-stocklabel').checked,
+      imagesAutoPicked: false,
       draft: !m.$('#pe-live').checked,
       stockStatus: stock <= 0 ? 'out' : 'in-stock',
     });
@@ -348,7 +422,8 @@ function openListing(id) {
   const p = getStore('inventory').find(x => x.id === id);
   if (!p) return;
   const prefs = JSON.parse(localStorage.getItem('oa_listing_prefs') || '{"business":true,"asIs":true}');
-  const photos = imagesOf(p);
+  // Marketplaces: real photos of the unit first, then website images
+  const photos = [...String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean), ...imagesOf(p)];
 
   const m = openAdminModal({
     title: 'Marketplace listing',
