@@ -140,6 +140,11 @@ function openProductEditor(id) {
           <label class="af"><span class="af-label">Stock *</span><input id="pe-stock" type="number" min="0" step="1" value="${esc(p.stock ?? 1)}" /></label>
           <label class="af"><span class="af-label">MSRP / retail ($)</span><input id="pe-msrp" type="number" min="0" value="${esc(p.msrp || '')}" placeholder="Shows savings" /></label>
           <label class="af"><span class="af-label">Competitor price ($)</span><input id="pe-ref" type="number" min="0" value="${esc(p.refPrice || '')}" placeholder="e.g. Lowe's price" /></label>
+          <div class="af span2 price-agent" id="pePrice">
+            <button type="button" class="ai-btn" id="pePriceBtn">${ic('search')}<span>Research the price online</span></button>
+            <span class="hint">Searches the web for new &amp; used prices of this model (about 10–30¢)</span>
+            <div id="pePriceOut"></div>
+          </div>
           <label class="af span2"><span class="af-label">Storage location <span class="hint">staff only</span></span><input id="pe-location" value="${esc(p.storageLocation)}" placeholder="e.g. Unit A, back row" /></label>
           <label class="af span2"><span class="af-label">Description</span><textarea id="pe-desc" rows="4" placeholder="Size, color, features, any cosmetic marks…">${esc(p.desc)}</textarea></label>
           <label class="af span2"><span class="af-label">Specs <span class="hint">one per line, like “Capacity: 4.5 cu ft”</span></span><textarea id="pe-specs" rows="3" placeholder="Width: 30 in&#10;Color: Stainless">${esc(specsText)}</textarea></label>
@@ -229,6 +234,47 @@ function openProductEditor(id) {
     }
   });
 
+  m.$('#pePriceBtn').addEventListener('click', async () => {
+    const product = {
+      name: m.$('#pe-name').value.trim(), brand: m.$('#pe-brand').value.trim(), model: m.$('#pe-model').value.trim(),
+      condition: m.$('#pe-condition').value, desc: m.$('#pe-desc').value.trim(),
+    };
+    if (!product.model && !product.name) return showAdminToast('⚠️ Enter the model number or name first (or use “Fill in details from photos”)');
+    const btn = m.$('#pePriceBtn'), out = m.$('#pePriceOut');
+    btn.disabled = true; btn.classList.add('busy');
+    btn.querySelector('span').textContent = 'Searching prices… (up to a minute)';
+    out.innerHTML = '';
+    try {
+      const { pricing: r } = await apiPost('admin_ai_price', { product });
+      const conf = { high: ['High confidence', '#1e8449'], medium: ['Medium confidence', '#1a6fa8'], low: ['Low confidence — little data found', '#b9770e'] }[r.confidence] || ['', '#555'];
+      out.innerHTML = `
+        <div class="price-card">
+          <div class="price-top">
+            <div><div class="hint">Suggested price</div><div class="price-big">${r.suggestedPrice ? money2(r.suggestedPrice).replace('.00', '') : '—'}</div>
+              ${r.rangeLow && r.rangeHigh ? `<div class="hint">Typical range ${money2(r.rangeLow).replace('.00','')}–${money2(r.rangeHigh).replace('.00','')}</div>` : ''}</div>
+            <div><div class="hint">MSRP / new</div><div class="price-mid">${r.msrp ? money2(r.msrp).replace('.00', '') : '—'}</div>${r.msrpNote ? `<div class="hint">${esc(r.msrpNote)}</div>` : ''}</div>
+          </div>
+          <div class="conf" style="color:${conf[1]}">${conf[0]}</div>
+          <p class="price-why">${esc(r.reasoning)}</p>
+          ${(r.comparables || []).length ? `<div class="af-label">What we found</div><ul class="comps">${r.comparables.map(c => `<li><span class="kind">${esc(c.kind)}</span><span class="t">${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}</span><strong>${money2(c.price).replace('.00', '')}</strong></li>`).join('')}</ul>` : ''}
+          <div class="contact-btns">
+            ${r.suggestedPrice ? `<button type="button" class="card-btn small primary" data-use-price="${r.suggestedPrice}">Use ${money2(r.suggestedPrice).replace('.00','')} as our price</button>` : ''}
+            ${r.msrp ? `<button type="button" class="card-btn small" data-use-msrp="${r.msrp}">Use ${money2(r.msrp).replace('.00','')} as MSRP</button>` : ''}
+          </div>
+        </div>`;
+    } catch (err) {
+      if (err.code === 'unauthorized') handleApiError(err, 'AI'); else out.innerHTML = `<div class="ai-err">⚠️ ${esc(err.message)}</div>`;
+    } finally {
+      btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('span').textContent = 'Research the price online';
+    }
+  });
+  m.$('#pePriceOut').addEventListener('click', e => {
+    const up = e.target.closest('[data-use-price]');
+    if (up) { m.$('#pe-price').value = Math.round(+up.dataset.usePrice); m.$('#pe-price').classList.add('ai-filled'); showAdminToast('✅ Price filled in — save to keep it'); }
+    const um = e.target.closest('[data-use-msrp]');
+    if (um) { m.$('#pe-msrp').value = Math.round(+um.dataset.useMsrp); m.$('#pe-msrp').classList.add('ai-filled'); showAdminToast('✅ MSRP filled in — save to keep it'); }
+  });
+
   m.$('#peLinkAdd').addEventListener('click', () => {
     const v = m.$('#peLink').value.trim();
     if (!/^https?:\/\//i.test(v)) return showAdminToast('⚠️ Paste a full link starting with https://');
@@ -248,7 +294,7 @@ function openProductEditor(id) {
       if (i > 0 && line.slice(i + 1).trim()) specs[line.slice(0, i).trim()] = line.slice(i + 1).trim();
     });
     const inv = getStore('inventory');
-    const record = existing ? inv.find(x => x.id === existing.id) : { id: 'PROD-' + Date.now(), _custom: true, badge: null, oldPrice: null };
+    const record = existing ? inv.find(x => x.id === existing.id) : { id: 'PROD-' + Date.now(), createdAt: new Date().toISOString(), _custom: true, badge: null, oldPrice: null };
     Object.assign(record, {
       name, brand, category, price, stock: Math.max(0, stock),
       condition: val('#pe-condition'), model: val('#pe-model'),
@@ -609,4 +655,17 @@ function aiTriageHtml(r) {
         ${r.phone ? `<a class="card-btn small" href="sms:${esc(r.phone)}?&body=${smsBody}">${ic('mail')} Open in Messages</a>` : ''}
       </div>` : ''}
     <div class="hint">AI suggestions — always confirm on site.</div>`;
+}
+
+// ─── Morning briefing ───
+async function sendBriefingNow(btn) {
+  btn.disabled = true;
+  const label = btn.innerHTML;
+  btn.innerHTML = `${ic('mail')} Sending…`;
+  try {
+    await apiPost('admin_briefing');
+    showAdminToast('✅ Briefing sent — check oceansideappliance96@gmail.com');
+  } catch (err) {
+    if (err.code === 'unauthorized') handleApiError(err, 'Briefing'); else showAdminToast('⚠️ ' + err.message);
+  } finally { btn.disabled = false; btn.innerHTML = label; }
 }

@@ -17,10 +17,13 @@
 //     POST {type:'admin_ai_product', key, images, hints}    → AI: product details from photos
 //     POST {type:'admin_ai_repair',  key, ticketId, force}  → AI: repair diagnosis + text draft
 //     POST {type:'admin_ai_listing', key, productId, …}     → AI: marketplace listing text
+//     POST {type:'admin_ai_price', key, product}            → AI agent: researches prices on the web
+//     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //
 //   AI SETUP (optional): Project Settings → Script properties → add
 //   ANTHROPIC_API_KEY = your Claude API key. Then run setupAutomations() once
-//   so new repair requests are diagnosed automatically every 10 minutes.
+//   so new repair requests are diagnosed automatically every 10 minutes and a
+//   morning briefing is emailed every day at 7am (Pacific).
 //
 //   SETUP / UPDATING — see README.md → "Google Sheets setup"
 //   1. Extensions → Apps Script → replace everything with this file → Save
@@ -169,6 +172,8 @@ function doPost(e) {
     if (type === 'admin_ai_product')   return jsonResponse(aiProductFromPhotos(data));
     if (type === 'admin_ai_repair')    return jsonResponse(aiRepairEndpoint(data));
     if (type === 'admin_ai_listing')   return jsonResponse(aiListing(data));
+    if (type === 'admin_ai_price')     return jsonResponse(aiPriceResearch(data));
+    if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_upsert') {
       requireCollection(data.collection);
       return jsonResponse(withLock(() => {
@@ -507,18 +512,11 @@ function getPhotoFolder() {
 const AI_MODEL = 'claude-opus-5';
 const APPLIANCE_CATEGORIES = ['refrigerator', 'washer', 'dryer', 'dishwasher', 'oven', 'microwave', 'freezer', 'vacuum', 'other'];
 
-function callClaude(opts) {
+function claudeRequest(body) {
   const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
   if (!key) throw new Error('AI is not set up yet. In Apps Script open Project Settings → Script properties and add ANTHROPIC_API_KEY.');
-  const body = {
-    model: AI_MODEL,
-    max_tokens: opts.maxTokens || 8000,
-    fallbacks: 'default', // if the model declines, Anthropic retries on its recommended fallback model
-    thinking: { type: 'adaptive' },
-    output_config: { effort: opts.effort || 'low', format: { type: 'json_schema', schema: opts.schema } },
-    system: opts.system,
-    messages: [{ role: 'user', content: opts.content }]
-  };
+  body.model = AI_MODEL;
+  body.fallbacks = 'default'; // if the model declines, Anthropic retries on its recommended fallback model
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post',
     contentType: 'application/json',
@@ -538,6 +536,18 @@ function callClaude(opts) {
   if (code !== 200) throw new Error('AI request failed (' + code + '): ' + ((json.error && json.error.message) || 'unknown error'));
   if (json.stop_reason === 'refusal') throw new Error('The AI declined this request.');
   if (json.stop_reason === 'max_tokens') throw new Error('The AI response was cut off — try again.');
+  return json;
+}
+
+// One request whose answer must match a JSON schema
+function callClaude(opts) {
+  const json = claudeRequest({
+    max_tokens: opts.maxTokens || 8000,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: opts.effort || 'low', format: { type: 'json_schema', schema: opts.schema } },
+    system: opts.system,
+    messages: [{ role: 'user', content: opts.content }]
+  });
   const text = (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
   try { return JSON.parse(text); } catch (err) { throw new Error('The AI response could not be read — try again.'); }
 }
@@ -652,6 +662,182 @@ function aiListing(d) {
   return { success: true, title: String(result.title || '').slice(0, 100), body: String(result.body || '') };
 }
 
+// ─── PRICING AGENT ───
+// Step 1: Claude searches the web for new + used prices of this model.
+// Step 2: a second call turns the research into structured numbers, using only
+//         links that the search actually returned.
+function aiPriceResearch(d) {
+  const p = d.product || {};
+  const name = clean(p.name, 150), brand = clean(p.brand, 60), model = clean(p.model, 60);
+  if (!model && !name) return fail('Add a model number or product name first.');
+  const condition = clean(p.condition, 40) || 'Used - Good';
+  const desc = clean(p.desc, 600);
+
+  const userText =
+    `Find current prices for this appliance so we can price it for sale.\n` +
+    `Brand: ${brand || 'unknown'}\nModel number: ${model || 'unknown'}\nName: ${name}\n` +
+    `Our unit's condition: ${condition}\n${desc ? 'Notes: ' + desc + '\n' : ''}\n` +
+    `Find: (1) the original MSRP / current new retail price for this exact model (or its closest current equivalent — say so), ` +
+    `(2) prices of the same or very similar model sold or listed used/refurbished (eBay sold, OfferUp, Facebook Marketplace, Craigslist, used appliance stores), ` +
+    `ideally in Southern California. Then recommend a fair asking price for our unit given its condition.`;
+  const messages = [{ role: 'user', content: userText }];
+  const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5,
+                   user_location: { type: 'approximate', city: 'Oceanside', region: 'California', country: 'US', timezone: 'America/Los_Angeles' } }];
+  const system = 'You are a pricing researcher for Oceanside Appliance, a used and new appliance store in Oceanside, CA. ' +
+    'Search efficiently, prefer sources that match the exact model number, and report prices with the URL where you found each one. ' +
+    'Be honest when you find little data. Finish with a short written summary of the prices you found.';
+
+  let json, research = [], sources = {};
+  for (let i = 0; i < 4; i++) { // resume if the server-side search loop pauses
+    json = claudeRequest({ max_tokens: 16000, thinking: { type: 'adaptive' }, output_config: { effort: 'low' }, system: system, tools: tools, messages: messages });
+    (json.content || []).forEach(b => {
+      if (b.type === 'text') research.push(b.text);
+      if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) {
+        b.content.forEach(r => { if (r.url) sources[r.url] = r.title || r.url; });
+      }
+    });
+    if (json.stop_reason !== 'pause_turn') break;
+    messages.push({ role: 'assistant', content: json.content });
+  }
+  const researchText = research.join('\n').trim();
+  if (!researchText) return fail('The pricing search came back empty — try again.');
+  const urls = Object.keys(sources).slice(0, 40);
+
+  const result = callClaude({
+    effort: 'low',
+    schema: strictObject({
+      suggestedPrice: { type: 'number', description: 'Recommended asking price in USD for our unit, or 0 if there is not enough data.' },
+      rangeLow: { type: 'number' }, rangeHigh: { type: 'number' },
+      msrp: { type: 'number', description: 'Original MSRP / new retail price in USD, or 0 if unknown.' },
+      msrpNote: { type: 'string', description: 'Where the MSRP came from, or that it is for the closest current equivalent.' },
+      confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+      reasoning: { type: 'string', description: '2-3 sentences explaining the recommendation.' },
+      comparables: { type: 'array', items: strictObject({
+        title: { type: 'string' }, price: { type: 'number' },
+        kind: { type: 'string', enum: ['new retail', 'used listing', 'used sold', 'refurbished'] },
+        url: { type: 'string', description: 'Must be copied exactly from the provided source list, or empty.' }
+      }) }
+    }),
+    system: 'Turn pricing research notes into structured data. Use only numbers stated in the notes. ' +
+      'Only use URLs that appear in the provided source list. Do not invent comparables.',
+    content: [{ type: 'text', text:
+      '<research_notes>\n' + researchText.slice(0, 20000) + '\n</research_notes>\n\n' +
+      '<source_list>\n' + urls.join('\n') + '\n</source_list>\n\n' +
+      `Our unit: ${brand} ${name} ${model ? '(model ' + model + ')' : ''}, condition ${condition}.` }]
+  });
+  const allowed = {}; urls.forEach(u => { allowed[u] = true; });
+  // Drop anything that cites a link the search never returned (likely invented)
+  result.comparables = (result.comparables || [])
+    .filter(c => c.price > 0 && (!c.url || allowed[c.url]))
+    .slice(0, 8)
+    .map(c => ({ title: c.title, price: c.price, kind: c.kind, url: c.url || '' }));
+  return { success: true, pricing: result, at: new Date().toISOString() };
+}
+
+// ─── MORNING BRIEFING ───
+function tzDay(d) { return Utilities.formatDate(new Date(d), 'America/Los_Angeles', 'yyyy-MM-dd'); }
+function money0(n) { return '$' + (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
+function htmlEsc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function listedAt(p) {
+  if (p.createdAt) return new Date(p.createdAt).getTime();
+  const m = /^PROD-(\d{12,})$/.exec(p.id || '');
+  return m ? Number(m[1]) : null;
+}
+
+function buildBriefing() {
+  const now = Date.now(), DAY = 86400000;
+  const today = tzDay(now), yesterday = tzDay(now - DAY);
+  const sales = readCollection('sales'), repairs = readCollection('repairs');
+  const views = readCollection('views'), inventory = readCollection('inventory');
+  const repairRev = readCollection('repairRevenue');
+  const inLast24 = r => now - new Date(r.timestamp).getTime() < DAY;
+
+  const newOrders = sales.filter(s => inLast24(s) && s.channel !== 'In store');
+  const newRepairs = repairs.filter(inLast24);
+  const newViews = views.filter(inLast24);
+  const staleOrders = sales.filter(s => s.status === 'pending' && now - new Date(s.timestamp).getTime() > DAY);
+  const unscheduled = repairs.filter(r => r.status === 'New' && now - new Date(r.timestamp).getTime() > DAY);
+  const openViews = views.filter(v => (v.status || 'New') === 'New');
+  const todays = repairs.filter(r => r.scheduledFor && tzDay(r.scheduledFor) === today && r.status !== 'Cancelled')
+    .sort((a, b) => new Date(a.scheduledFor) - new Date(b.scheduledFor));
+  const safety = repairs.filter(r => r.aiTriage && r.aiTriage.urgency === 'safety' && r.status !== 'Completed' && r.status !== 'Cancelled');
+
+  const stale = inventory.filter(p => (p.stock || 0) > 0 && listedAt(p) && now - listedAt(p) > 30 * DAY)
+    .map(p => ({ p: p, days: Math.floor((now - listedAt(p)) / DAY) }))
+    .sort((a, b) => b.days - a.days).slice(0, 8);
+
+  const counted = s => s.status !== 'cancelled';
+  const sumSales = f => sales.filter(s => counted(s) && f(s)).reduce((t, s) => t + (Number(s.total) || 0), 0);
+  const sumRR = f => repairRev.filter(f).reduce((t, r) => t + (Number(r.amount) || 0), 0);
+  const month = today.slice(0, 7);
+  const rev = {
+    yesterday: sumSales(s => tzDay(s.timestamp) === yesterday) + sumRR(r => r.date === yesterday),
+    month: sumSales(s => tzDay(s.timestamp).slice(0, 7) === month) + sumRR(r => String(r.date).slice(0, 7) === month)
+  };
+
+  return { today, newOrders, newRepairs, newViews, staleOrders, unscheduled, openViews, todays, safety, stale, rev,
+           inStock: inventory.filter(p => (p.stock || 0) > 0).length };
+}
+
+function briefingPriorities(b) {
+  if (!PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY')) return [];
+  const facts = {
+    newOrders: b.newOrders.map(s => `${s.orderId} ${s.firstName} ${s.lastName} $${s.total} (${s.status})`),
+    newRepairRequests: b.newRepairs.map(r => `${r.ticketId} ${r.applianceType}: ${String(r.description).slice(0, 120)}`),
+    ordersWaitingOver24h: b.staleOrders.map(s => `${s.orderId} ${s.firstName} ${s.lastName}`),
+    repairsNotScheduledOver24h: b.unscheduled.map(r => `${r.ticketId} ${r.firstName} ${r.applianceType}`),
+    viewingRequestsOpen: b.openViews.length,
+    safetyRepairs: b.safety.map(r => `${r.ticketId} ${r.applianceType}`),
+    todaysSchedule: b.todays.map(r => `${Utilities.formatDate(new Date(r.scheduledFor), 'America/Los_Angeles', 'h:mm a')} ${r.applianceType} — ${r.address}`),
+    itemsListedOver30Days: b.stale.map(x => `${x.p.name} $${x.p.price}, ${x.days} days`)
+  };
+  try {
+    const out = callClaude({
+      effort: 'low',
+      schema: strictObject({ priorities: { type: 'array', items: { type: 'string' } } }),
+      system: 'You write the "top priorities" for the owner of Oceanside Appliance each morning. ' +
+        'Given the facts, list up to 4 short, specific actions in order of importance (safety first, then customers waiting, then revenue). ' +
+        'Each under 20 words. Only use the facts given. If nothing needs action, return one encouraging line.',
+      content: [{ type: 'text', text: JSON.stringify(facts) }]
+    });
+    return (out.priorities || []).slice(0, 4);
+  } catch (err) { return []; }
+}
+
+function sendDailyBriefing() {
+  const b = buildBriefing();
+  const priorities = briefingPriorities(b);
+  const admin = (PropertiesService.getScriptProperties().getProperty('SITE_URL') || 'https://farhant6.github.io/oceanside-appliance/') + 'staff-9k2x/';
+  const sec = (title, rows, empty) => `<h3 style="font:600 15px Georgia,serif;color:#1a2e44;margin:22px 0 8px">${title}</h3>` +
+    (rows.length ? `<ul style="margin:0;padding-left:18px;color:#3d5166;font:14px/1.6 Arial,sans-serif">${rows.map(r => `<li>${r}</li>`).join('')}</ul>`
+                 : `<p style="margin:0;color:#8fa3b8;font:14px Arial,sans-serif">${empty}</p>`);
+  const stat = (label, value) => `<td style="padding:12px 14px;background:#f3f8fd;border-radius:10px;text-align:center"><div style="font:700 20px Georgia,serif;color:#1a2e44">${value}</div><div style="font:11px Arial,sans-serif;color:#6f849a;text-transform:uppercase;letter-spacing:.06em">${label}</div></td>`;
+  const html = `<div style="max-width:600px;margin:0 auto;padding:8px">
+    <div style="font:700 22px Georgia,serif;color:#1a2e44">Good morning ☀️</div>
+    <div style="font:13px Arial,sans-serif;color:#6f849a;margin-bottom:16px">Oceanside Appliance · ${Utilities.formatDate(new Date(), 'America/Los_Angeles', 'EEEE, MMMM d')}</div>
+    <table style="width:100%;border-spacing:8px 0"><tr>
+      ${stat('Yesterday', money0(b.rev.yesterday))}${stat('This month', money0(b.rev.month))}${stat('New orders', b.newOrders.length)}${stat('New repairs', b.newRepairs.length)}
+    </tr></table>
+    ${b.safety.length ? `<div style="margin-top:16px;padding:12px 14px;background:#fdecea;border-radius:10px;color:#922b21;font:600 14px Arial,sans-serif">⚠️ Safety: ${b.safety.map(r => htmlEsc(r.ticketId + ' — ' + r.applianceType + ' (' + r.firstName + ')')).join(', ')}</div>` : ''}
+    ${priorities.length ? sec('✨ Top priorities today', priorities.map(htmlEsc), '') : ''}
+    ${sec('📅 Today\'s schedule', b.todays.map(r => `<b>${Utilities.formatDate(new Date(r.scheduledFor), 'America/Los_Angeles', 'h:mm a')}</b> — ${htmlEsc(r.firstName + ' ' + r.lastName)}, ${htmlEsc(r.applianceType)} · ${htmlEsc(r.address)} · <a href="tel:${htmlEsc(r.phone)}">${htmlEsc(r.phone)}</a>${r.assignedTo ? ' · ' + htmlEsc(r.assignedTo) : ''}`), 'Nothing scheduled.')}
+    ${sec('⏳ Waiting on you', [
+      ...b.staleOrders.map(s => `Order <b>${htmlEsc(s.orderId)}</b> — ${htmlEsc(s.firstName + ' ' + s.lastName)} (${money0(s.total)}) hasn't been confirmed · <a href="tel:${htmlEsc(s.phone)}">${htmlEsc(s.phone)}</a>`),
+      ...b.unscheduled.map(r => `Repair <b>${htmlEsc(r.ticketId)}</b> — ${htmlEsc(r.firstName)}'s ${htmlEsc(r.applianceType)} isn't scheduled yet · <a href="tel:${htmlEsc(r.phone)}">${htmlEsc(r.phone)}</a>`),
+      ...(b.openViews.length ? [`${b.openViews.length} viewing request${b.openViews.length > 1 ? 's' : ''} to follow up`] : [])
+    ], 'All caught up. 👍')}
+    ${sec('🆕 New in the last 24 hours', [
+      ...b.newOrders.map(s => `Order ${htmlEsc(s.orderId)} — ${htmlEsc(s.firstName + ' ' + s.lastName)}: ${htmlEsc(s.items)}`),
+      ...b.newRepairs.map(r => `Repair ${htmlEsc(r.ticketId)} — ${htmlEsc(r.applianceType)}: ${htmlEsc(String(r.description).slice(0, 90))}`),
+      ...b.newViews.map(v => `Viewing request — ${htmlEsc(v.name)} for ${htmlEsc(v.appliance)}`)
+    ], 'Nothing new.')}
+    ${sec('🏷 Listed 30+ days — consider a price drop', b.stale.map(x => `${htmlEsc(x.p.name)} — ${money0(x.p.price)}, listed ${x.days} days → try ${money0(Math.round(x.p.price * (x.days >= 60 ? 0.85 : 0.9) / 5) * 5)}`), `None — ${b.inStock} item${b.inStock === 1 ? '' : 's'} in stock, all listed recently.`)}
+    <p style="margin-top:26px"><a href="${admin}" style="display:inline-block;background:#1a7fc1;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font:600 14px Arial,sans-serif">Open the staff panel</a></p>
+  </div>`;
+  MailApp.sendEmail({ to: NOTIFY_EMAIL, subject: `☀️ Oceanside Appliance — ${Utilities.formatDate(new Date(), 'America/Los_Angeles', 'EEE MMM d')} briefing`, htmlBody: html, body: 'Your daily briefing is best viewed in an email app that shows HTML.' });
+}
+
 // ▶ Runs every 10 minutes once setupAutomations() has been run.
 // Diagnoses new repair requests and emails the owner the result.
 function autoTriageRepairs() {
@@ -677,13 +863,14 @@ function autoTriageRepairs() {
   });
 }
 
-// ▶ Run once from the editor to turn on automatic repair diagnosis.
+// ▶ Run once from the editor to turn on the automations (safe to run again).
 function setupAutomations() {
   ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'autoTriageRepairs')
+    .filter(t => ['autoTriageRepairs', 'sendDailyBriefing'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('autoTriageRepairs').timeBased().everyMinutes(10).create();
-  Logger.log('Automatic repair diagnosis is on (every 10 minutes).');
+  ScriptApp.newTrigger('sendDailyBriefing').timeBased().everyDays(1).atHour(7).inTimezone('America/Los_Angeles').create();
+  Logger.log('On: repair diagnosis every 10 minutes, morning briefing daily at 7am Pacific.');
 }
 
 // ─── AUTH ───
