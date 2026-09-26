@@ -346,7 +346,7 @@ function renderRepairs() {
       <td>${esc(r.firstName)} ${esc(r.lastName)}<br><small style="color:var(--gray-mid)">${esc(r.address)}</small></td>
       <td><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></td>
       <td style="text-transform:capitalize">${esc(r.applianceType)}${r.brand ? `<br><small style="color:var(--gray-mid)">${esc(r.brand)}</small>` : ''}${r.requestType && r.requestType !== 'Repair' ? `<br>${typeTag(r.requestType)}` : ''}</td>
-      <td class="wrap" style="color:var(--gray-dark)">${esc(desc.substring(0, 70))}${desc.length > 70 ? '…' : ''}</td>
+      <td class="wrap" style="color:var(--gray-dark)">${r.aiTriage && typeof urgencyTag === 'function' ? urgencyTag(r.aiTriage.urgency) + ' ' : ''}${esc(desc.substring(0, 70))}${desc.length > 70 ? '…' : ''}</td>
       <td>${r.scheduledFor ? formatDate(r.scheduledFor) : '<span style="color:var(--gray-mid)">—</span>'}</td>
       <td>
         <select onchange="updateRepairStatus('${id}', this.value)" class="status-select">

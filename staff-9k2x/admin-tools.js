@@ -123,6 +123,8 @@ function openProductEditor(id) {
             <input type="file" id="peFiles" accept="image/*" multiple hidden />
           </label>
           <div class="upload-status" id="peStatus" hidden></div>
+          <button type="button" class="ai-btn" id="peAI">${ic('sparkles')}<span>Fill in details from photos</span></button>
+          <div class="ai-note" id="peAINote" hidden></div>
           <div class="link-add">
             <input type="url" id="peLink" placeholder="…or paste an image link" />
             <button type="button" class="card-btn small" id="peLinkAdd">Add</button>
@@ -197,6 +199,34 @@ function openProductEditor(id) {
     m.$('#peSave').disabled = false;
     status.textContent = failed ? `⚠️ ${failed} photo${failed > 1 ? 's' : ''} didn’t upload. Check your connection and try again.` : '✅ Photos uploaded';
     if (!failed) setTimeout(() => { status.hidden = true; }, 2500);
+  });
+
+  m.$('#peAI').addEventListener('click', async () => {
+    if (!photos.length) return showAdminToast('⚠️ Add a photo first — include the model sticker if you can');
+    const btn = m.$('#peAI'), note = m.$('#peAINote');
+    btn.disabled = true; btn.classList.add('busy'); btn.querySelector('span').textContent = 'Looking at your photos…';
+    try {
+      const hints = { name: m.$('#pe-name').value, brand: m.$('#pe-brand').value, model: m.$('#pe-model').value, category: m.$('#pe-category').value };
+      const { suggestion: s } = await apiPost('admin_ai_product', { images: photos.slice(0, 4), hints });
+      const filled = [];
+      const put = (sel, val) => {
+        const el = m.$(sel);
+        if (!val || String(el.value).trim()) return; // never overwrite what you typed
+        el.value = val; el.classList.add('ai-filled'); filled.push(sel);
+      };
+      put('#pe-name', s.name); put('#pe-brand', s.brand); put('#pe-model', s.model);
+      if (s.category && !m.$('#pe-category').value) { m.$('#pe-category').value = s.category; m.$('#pe-category').classList.add('ai-filled'); filled.push('category'); }
+      if (s.conditionGuess && s.conditionGuess !== 'Unknown' && !existing) { m.$('#pe-condition').value = s.conditionGuess; m.$('#pe-condition').classList.add('ai-filled'); }
+      put('#pe-desc', s.description);
+      if (Array.isArray(s.specs) && s.specs.length) put('#pe-specs', s.specs.filter(x => x.label && x.value).map(x => `${x.label}: ${x.value}`).join('\n'));
+      note.hidden = false;
+      note.innerHTML = `${ic('sparkles')}<span><strong>${filled.length ? 'Filled in the highlighted fields.' : 'Nothing new to fill — your fields were already set.'}</strong> Double-check before saving${s.checkBeforeSaving ? ': ' + esc(s.checkBeforeSaving) : '.'}</span>`;
+    } catch (err) {
+      if (err.code === 'unauthorized') handleApiError(err, 'AI');
+      else showAdminToast('⚠️ ' + err.message);
+    } finally {
+      btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('span').textContent = 'Fill in details from photos';
+    }
   });
 
   m.$('#peLinkAdd').addEventListener('click', () => {
@@ -282,7 +312,7 @@ function openListing(id) {
         <label class="toggle"><input type="checkbox" id="lsAsIs" ${prefs.asIs ? 'checked' : ''} /><span></span>Add “Sold as-is”</label>
       </div>
       <div class="af-label">Title <button type="button" class="link-btn" data-copy="title">${ic('copy')} Copy</button></div>
-      <input id="lsTitle" class="ls-field" readonly />
+      <input id="lsTitle" class="ls-field" />
       <div class="af-label">Description <button type="button" class="link-btn" data-copy="body">${ic('copy')} Copy</button></div>
       <textarea id="lsBody" class="ls-field" rows="12"></textarea>
       <div class="af-label">Photos ${photos.length ? '<span class="hint">tap a photo to open it, then save it to your phone</span>' : ''}</div>
@@ -292,6 +322,7 @@ function openListing(id) {
       <div class="tip">${ic('help')}<span>When it sells on a marketplace, click <strong>Record sale</strong> so it comes off the website right away.</span></div>`,
     footer: `
       <button type="button" class="card-btn" id="lsCopyLink">${ic('share')} Copy website link</button>
+      <button type="button" class="card-btn ai" id="lsAI">${ic('sparkles')} <span>Polish with AI</span></button>
       <span style="flex:1"></span>
       <button type="button" class="card-btn primary" id="lsCopyAll">${ic('copy')} Copy title + description</button>`,
   });
@@ -312,6 +343,20 @@ function openListing(id) {
   m.$('#lsCopyAll').addEventListener('click', () => copyText(`${m.$('#lsTitle').value}\n\n${m.$('#lsBody').value}`, 'Listing copied'));
   m.$('#lsCopyLink').addEventListener('click', () => copyText(productUrl(p.id), 'Link copied'));
   m.$('#lsAddPhotos')?.addEventListener('click', () => { m.close(); openProductEditor(p.id); });
+  m.$('#lsAI').addEventListener('click', async () => {
+    const btn = m.$('#lsAI');
+    btn.disabled = true; btn.querySelector('span').textContent = 'Writing…';
+    try {
+      const r = await apiPost('admin_ai_listing', { productId: p.id, business: m.$('#lsBiz').checked, asIs: m.$('#lsAsIs').checked, link: productUrl(p.id) });
+      m.$('#lsTitle').value = r.title;
+      m.$('#lsBody').value = r.body;
+      showAdminToast('✨ Listing rewritten — read it over before posting');
+    } catch (err) {
+      if (err.code === 'unauthorized') handleApiError(err, 'AI'); else showAdminToast('⚠️ ' + err.message);
+    } finally {
+      btn.disabled = false; btn.querySelector('span').textContent = 'Polish with AI';
+    }
+  });
 }
 
 // ─── Record a sale (in store or on a marketplace) ───
@@ -467,6 +512,7 @@ function openRepairDetail(ticketId, { askPayment = false } = {}) {
         ${detailRow('Address', esc(r.address))}${detailRow('Phone', esc(r.phone))}${detailRow('Email', esc(r.email))}
       </div>
       <div class="problem">${esc(r.description) || 'No description provided.'}</div>
+      <div class="ai-panel" id="rd-ai">${aiTriageHtml(r)}</div>
       <div class="af-grid">
         <label class="af"><span class="af-label">Scheduled for</span><input id="rd-when" type="datetime-local" value="${toLocalInput(r.scheduledFor)}" /></label>
         <label class="af"><span class="af-label">Technician</span><input id="rd-tech" value="${esc(r.assignedTo)}" placeholder="Who's going" /></label>
@@ -481,6 +527,25 @@ function openRepairDetail(ticketId, { askPayment = false } = {}) {
     footer: `<span style="flex:1"></span><button type="button" class="card-btn" data-am-close>Close</button><button type="button" class="card-btn primary" id="rd-save">Save</button>`,
   });
   m.$('#rd-status').addEventListener('change', e => { m.$('#rd-pay').hidden = e.target.value !== 'Completed'; });
+  m.$('#rd-ai').addEventListener('click', async e => {
+    const copy = e.target.closest('[data-copy-text]');
+    if (copy) return copyText(copy.dataset.copyText, 'Text copied');
+    const run = e.target.closest('[data-ai-run]');
+    if (!run) return;
+    run.disabled = true; run.innerHTML = `${ic('sparkles')} Thinking…`;
+    try {
+      const res = await apiPost('admin_ai_repair', { ticketId, force: run.dataset.aiRun === 'again' });
+      const repairs = getRepairs();
+      const rec = repairs.find(x => x.ticketId === ticketId);
+      rec.aiTriage = res.triage; rec.aiAt = res.at; rec.aiTriageError = '';
+      setStore('repairs', repairs);
+      m.$('#rd-ai').innerHTML = aiTriageHtml(rec);
+      renderRepairs();
+    } catch (err) {
+      if (err.code === 'unauthorized') handleApiError(err, 'AI'); else showAdminToast('⚠️ ' + err.message);
+      run.disabled = false; run.innerHTML = `${ic('sparkles')} Try again`;
+    }
+  });
   if (askPayment) setTimeout(() => m.$('#rd-amount')?.focus(), 80);
 
   m.$('#rd-save').addEventListener('click', () => {
@@ -511,4 +576,37 @@ function openRepairDetail(ticketId, { askPayment = false } = {}) {
     m.close();
     showAdminToast(rec.paymentLogged && amount > 0 ? '✅ Saved and payment logged' : '✅ Repair saved');
   });
+}
+
+// ─── AI repair diagnosis panel ───
+const URGENCY = { safety: ['⚠️ Safety', '#c0392b'], high: ['High', '#e67e22'], normal: ['Normal', '#1a7fc1'], low: ['Low', '#7f8c8d'] };
+function urgencyTag(u) {
+  const [label, color] = URGENCY[u] || URGENCY.normal;
+  return `<span class="urg-tag" style="color:${color};background:${color}1a">${label}</span>`;
+}
+function aiTriageHtml(r) {
+  const t = r.aiTriage;
+  if (!t) {
+    return `<div class="ai-empty">
+      <div>${ic('sparkles')}<strong>AI diagnosis</strong><span>Likely causes, parts to bring, questions to ask and a ready-to-send text.</span></div>
+      ${r.aiTriageError ? `<div class="ai-err">Last attempt failed: ${esc(r.aiTriageError)}</div>` : ''}
+      <button type="button" class="ai-btn" data-ai-run="first">${ic('sparkles')} Get AI diagnosis</button>
+    </div>`;
+  }
+  const smsBody = encodeURIComponent(t.textMessageDraft || '');
+  return `
+    <div class="ai-head">${ic('sparkles')}<strong>AI diagnosis</strong>${urgencyTag(t.urgency)}<span class="hint">${r.aiAt ? formatDate(r.aiAt) : ''}</span>
+      <button type="button" class="link-btn" data-ai-run="again" style="margin-left:auto">${ic('refresh')} Redo</button></div>
+    <p class="ai-summary">${esc(t.summary)}</p>
+    ${t.safetyNote ? `<div class="ai-safety">${ic('alert')}<span>${esc(t.safetyNote)}</span></div>` : ''}
+    ${(t.likelyCauses || []).length ? `<div class="ai-sub">Likely causes</div><ul class="ai-list">${t.likelyCauses.map(c => `<li><span class="lk ${esc(c.likelihood)}">${esc(c.likelihood)}</span><div><strong>${esc(c.cause)}</strong>${c.check ? `<br><small>Check: ${esc(c.check)}</small>` : ''}</div></li>`).join('')}</ul>` : ''}
+    ${(t.partsToBring || []).length ? `<div class="ai-sub">Parts worth bringing</div><div class="ai-chips">${t.partsToBring.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''}
+    ${(t.questionsForCustomer || []).length ? `<div class="ai-sub">Ask the customer</div><ul class="ai-q">${t.questionsForCustomer.map(q => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}
+    ${t.textMessageDraft ? `<div class="ai-sub">Text to send</div>
+      <div class="ai-sms">${esc(t.textMessageDraft)}</div>
+      <div class="contact-btns">
+        <button type="button" class="card-btn small" data-copy-text="${esc(t.textMessageDraft)}">${ic('copy')} Copy</button>
+        ${r.phone ? `<a class="card-btn small" href="sms:${esc(r.phone)}?&body=${smsBody}">${ic('mail')} Open in Messages</a>` : ''}
+      </div>` : ''}
+    <div class="hint">AI suggestions — always confirm on site.</div>`;
 }

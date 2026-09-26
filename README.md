@@ -36,6 +36,7 @@ This is a production website for an active business. It handles the full custome
 - Order and repair detail views with call / text / email / map buttons, internal notes, scheduling and technician
 - Marking a repair Completed offers to log the payment in the Ledger
 - Search on Sales, Repairs and Inventory
+- **AI helpers** (optional): product details from photos, automatic repair diagnosis with a text-message draft, listing polish — see "AI features" below
 
 ---
 
@@ -83,6 +84,24 @@ Existing tabs in the old format are read automatically and converted to the new 
 To change the key later, run `setupAdminKey()` again and paste the new key into the staff panel.
 
 **After updating the script:** always re-deploy (Deploy → Manage deployments → ✏️ → New version). Photo upload needs Google Drive access, so the first time you update to a version with photo upload, run any function once (e.g. `initialSetup`) and approve the new Drive permission.
+
+---
+
+## AI features (optional, powered by Claude)
+
+The AI runs inside Apps Script, so the API key never appears in the website code.
+
+- **Fill in details from photos** (product editor): reads the photos — including the model sticker — and drafts the name, brand, model, category, description and specs. It never overwrites fields you've already typed.
+- **Repair diagnosis**: likely causes, parts to bring, questions to ask, an urgency level (with a safety warning when needed) and a ready-to-send text message. New requests are diagnosed automatically and emailed to you; you can also run it from any repair.
+- **Polish with AI** (marketplace listing): rewrites the listing using only the product's facts.
+
+**Setup (about 5 minutes):**
+1. Create an API key at console.anthropic.com (add a payment method; typical cost is a few cents per photo fill-in or diagnosis).
+2. Apps Script → ⚙️ **Project Settings** → **Script properties** → **Add script property**: name `ANTHROPIC_API_KEY`, value = your key → Save.
+3. Paste in the latest `google-apps-script.js`, save, then run **`setupAutomations`** once (▶ Run → allow the new permissions). This turns on automatic diagnosis every 10 minutes.
+4. **Deploy → Manage deployments → ✏️ → New version → Deploy.**
+
+To turn automatic diagnosis off, open ⏰ **Triggers** in Apps Script and delete the `autoTriageRepairs` trigger.
 
 ---
 
