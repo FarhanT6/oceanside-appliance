@@ -681,3 +681,47 @@
 .af.check input[type="checkbox"], .check-line input[type="checkbox"] { width: auto; flex: 0 0 auto; margin: 0; accent-color: var(--ocean); }
 .af.check { justify-content: flex-start; flex-wrap: wrap; }
 .pe-sec > .af-label { flex-wrap: wrap; }
+
+/* ── Inventory header: title + search on one line, actions below ── */
+.card-header.inv-header { display: grid; grid-template-columns: auto minmax(0, 320px); justify-content: space-between; align-items: center; gap: .75rem 1rem; }
+.inv-header .table-search { width: 100%; min-width: 0; }
+.inv-actions { grid-column: 1 / -1; }
+.inv-actions-gap { flex: 1; }
+
+/* ── Phones: inventory rows become cards ── */
+@media (max-width: 600px) {
+  .card-header.inv-header { grid-template-columns: 1fr; }
+  .inv-header .table-search { font-size: 16px; padding: .6rem .8rem; } /* 16px stops iOS zooming in */
+  .inv-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+  .inv-actions .card-btn { justify-content: center; padding: .55rem .5rem; }
+  .inv-actions .card-btn.ai, .inv-actions .card-btn.primary { grid-column: span 3; padding: .7rem; font-size: .85rem; }
+  .inv-actions-gap { display: none; }
+
+  .admin-card:has(.inv-table) { overflow-x: visible; }
+  .inv-table, .inv-table tbody { display: block; }
+  .inv-table thead { display: none; }
+  .inv-table tr { display: grid; grid-template-columns: 60px 1fr auto; grid-template-areas: "thumb name name" "thumb cond loc" "price price stock" "act act act"; gap: .5rem .75rem; padding: .9rem .25rem; border-bottom: 1px solid var(--gray-light); }
+  .inv-table tr:hover td { background: none; }
+  .inv-table td { padding: 0; border: none; white-space: normal; max-width: none; min-width: 0; }
+  .inv-table td.c-thumb { grid-area: thumb; }
+  .inv-table td.c-name { grid-area: name; }
+  .inv-table td.c-cond { grid-area: cond; }
+  .inv-table td.c-loc { grid-area: loc; text-align: right; font-size: .78rem; }
+  .inv-table td.c-price { grid-area: price; }
+  .inv-table td.c-stock { grid-area: stock; }
+  .inv-table td.c-price, .inv-table td.c-stock { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; }
+  .inv-table td.c-stock { align-items: flex-end; }
+  .inv-table td.c-price::before, .inv-table td.c-stock::before { content: attr(data-label); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--gray-mid); }
+  .inv-table td.c-act { grid-area: act; display: flex; align-items: center; gap: .25rem; }
+  .inv-table td.c-act .card-btn.small { flex: 1; justify-content: center; padding: .55rem; font-size: .82rem; }
+  .inv-table td.c-act .action-btn { width: 40px; height: 40px; }
+  .inv-table .inv-thumb { width: 60px; height: 60px; }
+  .inv-table .mini-input { font-size: 16px; }
+  .inv-table .c-price .mini-input { width: 100% !important; max-width: 140px; text-align: left; }
+  .inv-table td.c-price { align-items: stretch; }
+  .inv-table .stepper .mini-input { width: 52px; }
+  .inv-table .stepper button { width: 34px; height: 34px; }
+  .inv-table tr:has(.section-row), .inv-table tr:has(.empty-row) { display: block; padding: 0; }
+  .inv-table .section-row, .inv-table .empty-row { display: block; border-radius: 6px; }
+  .inv-table .section-row { margin-top: .5rem; }
+}

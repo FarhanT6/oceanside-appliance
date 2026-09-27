@@ -298,18 +298,19 @@
     <!-- ── INVENTORY TAB ── -->
     <div class="admin-tab" id="tab-inventory">
       <div class="admin-card">
-        <div class="card-header">
+        <div class="card-header inv-header">
           <div class="card-title">Inventory</div>
-          <div class="card-tools">
-            <input type="search" class="table-search" id="inventorySearch" placeholder="Search products…" oninput="renderInventory()" />
+          <input type="search" class="table-search" id="inventorySearch" placeholder="Search products…" oninput="renderInventory()" />
+          <div class="card-tools inv-actions">
             <button class="card-btn ai" onclick="openBulkImport()"><svg class="ic"><use href="../img/icons.svg#i-camera"/></svg> Bulk add from photos</button>
             <button class="card-btn primary" onclick="openProductEditor()"><svg class="ic"><use href="../img/icons.svg#i-plus"/></svg> Add Product</button>
-            <button class="card-btn primary" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save All</button>
-            <button class="card-btn primary" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
+            <span class="inv-actions-gap"></span>
+            <button class="card-btn" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save All</button>
+            <button class="card-btn" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
             <button class="card-btn" onclick="exportCSV('inventory')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> CSV</button>
           </div>
         </div>
-        <table class="admin-table">
+        <table class="admin-table inv-table">
           <thead><tr><th></th><th>Product</th><th>Condition</th><th>Location</th><th>Price ($)</th><th>Stock</th><th>Actions</th></tr></thead>
           <tbody id="inventoryTbody"></tbody>
         </table>
