@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="../css/styles.css?v=10" />
-  <link rel="stylesheet" href="admin.css?v=10" />
+  <link rel="stylesheet" href="../css/styles.css?v=11" />
+  <link rel="stylesheet" href="admin.css?v=11" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -157,6 +157,15 @@
           <div class="kpi-label">Out of Stock Items</div>
           <div class="kpi-change neutral" id="kpi-lowstock-sub"></div>
         </div>
+      </div>
+
+      <!-- AI follow-up drafts -->
+      <div class="admin-card fu-card" id="followupsCard">
+        <div class="card-header">
+          <div class="card-title">Follow-ups to send <span class="fu-count" id="fuCount"></span></div>
+          <button class="card-btn ai" id="fuDraftBtn" onclick="draftFollowupsNow(this)"><svg class="ic"><use href="../img/icons.svg#i-sparkles"/></svg> Draft follow-ups now</button>
+        </div>
+        <div id="followupsList"></div>
       </div>
 
       <div class="admin-grid-2">
@@ -345,9 +354,9 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=10"></script>
-<script src="admin-tools.js?v=10"></script>
-<script src="bulk-import.js?v=10"></script>
+<script src="admin.js?v=11"></script>
+<script src="admin-tools.js?v=11"></script>
+<script src="bulk-import.js?v=11"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

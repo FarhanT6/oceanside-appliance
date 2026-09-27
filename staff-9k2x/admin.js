@@ -59,9 +59,9 @@ function getAdminKey() { return localStorage.getItem('oa_admin_key') || ''; }
 // Local store key for each Sheets collection
 const COLLECTION_STORE = {
   inventory: 'inventory', sales: 'sales', repairs: 'repairs',
-  views: 'view_requests', repairRevenue: 'repair_revenue'
+  views: 'view_requests', repairRevenue: 'repair_revenue', followups: 'followups'
 };
-const COLLECTION_ID = { inventory: 'id', sales: 'orderId', repairs: 'ticketId', views: 'requestId', repairRevenue: 'id' };
+const COLLECTION_ID = { inventory: 'id', sales: 'orderId', repairs: 'ticketId', views: 'requestId', repairRevenue: 'id', followups: 'id' };
 
 let sheetsState = 'idle'; // idle | ok | error | nokey
 
@@ -200,6 +200,7 @@ function renderDashboard() {
   `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No sales yet</td></tr>';
 
   renderViewRequests();
+  renderFollowups();
 
   const recentRepairs = [...repairs].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
   document.getElementById('recentRepairsTbody').innerHTML = recentRepairs.map(r => `

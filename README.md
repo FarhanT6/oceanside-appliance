@@ -97,15 +97,20 @@ The AI runs inside Apps Script, so the API key never appears in the website code
 - **Pricing research agent** (product editor → "Research the price online"): searches the web for this model's new retail price and used/sold prices, then suggests an asking price with a range, confidence level and the links it used. One click fills in the price or MSRP. About 10–30¢ per lookup.
 - **Bulk add from photos** (Inventory → "Bulk add from photos"): pick a whole batch of photos at once. They're sorted by when they were taken, Claude groups consecutive photos by appliance and spots the ones showing a model sticker or box label, then reads each appliance's details from those full-size label photos. Review the groups (move a photo, split, merge, remove), add prices or run the pricing agent, and save — items without a price are saved as **drafts** (hidden from the website until published). About 3–5¢ per 24 photos to group plus 5–10¢ per appliance to read details.
 - **Website images from the web** (product editor → "Find product images online", plus automatic): your own photos are kept as staff-only *inventory photos*; customers see clean product images of the same model. Claude searches for the model's product pages (manufacturer site first, then major retailers), the images on those pages are compared with your photo of the unit (same model? same color? clean product shot?), and the chosen ones are copied into your Drive folder. Products without website images get them automatically every 15 minutes (tagged "Check images" until you review). The website marks these with a "Stock photo" label, and for used items notes that the actual unit may differ. About 10–25¢ per product. *Product images are the manufacturer's or retailer's copyright — manufacturer images are generally the safer choice for dealers; retailer photos carry more risk.*
-- **Morning briefing** (emailed daily at 7am Pacific): yesterday's and month-to-date revenue, safety alerts, today's scheduled repairs, orders and repairs waiting on you, what came in overnight, items listed 30+ days with a suggested price drop, and AI-picked top priorities. "Send today's briefing" in the staff panel sends one on demand.
+- **Morning briefing** (emailed daily at 7am Pacific): yesterday's and month-to-date revenue, safety alerts, today's scheduled repairs, orders and repairs waiting on you, what came in overnight, follow-ups ready to send, customer emails and website chats from the last day, items listed 30+ days with a suggested price drop, and AI-picked top priorities. "Send today's briefing" in the staff panel sends one on demand.
+- **Follow-up drafts** (dashboard → "Follow-ups to send", drafted daily at 6am or with "Draft follow-ups now"): check-ins 2–21 days after a finished repair and 5–30 days after a sale, plus reminders for reservations and viewing requests that haven't been confirmed. Edit the text if you like, then tap **Text** (opens your phone's messages with it filled in), **Email** or **Copy**, and **Done**. Nothing is ever sent automatically. Reminders close themselves once the order or viewing is handled. Add a `REVIEW_LINK` script property to have check-ins invite happy customers to leave a review. Under 1¢ per follow-up.
+- **Website chat** ("Ask us" button on every page): answers questions using only the store's facts and what's in stock, links to matching products, and points people to the repair form or a call. It never quotes prices that aren't listed, repair costs or appointment times. Chats are saved to the **Website Chats** tab. It's capped at 150 messages a day (change with a `CHAT_DAILY_LIMIT` script property); after that it asks people to call. About 1–2¢ per message.
+- **Email inbox assistant** (separate script — `inbox-assistant.js`): every 10 minutes it reads new emails in oceansideappliance96@gmail.com and, for real customer emails, saves a **draft reply** in the same thread labeled `AI-draft-ready` (newsletters, receipts and personal mail are skipped). You review and send it yourself. Each email is logged to the **Customer Emails** tab with a one-line summary and anything you need to decide. About 1–3¢ per email. Setup is at the top of that file: sign in as the business Gmail, create a new Apps Script project, paste the file, add `WEB_APP_URL` and `STAFF_KEY` script properties, and run `setupInboxAssistant`.
+
+The chat and email assistants share one set of store facts. Add a `BUSINESS_NOTES` script property (e.g. hours, delivery area details, service-call fee) to teach them more — they won't make up anything that isn't there.
 
 **Setup (about 5 minutes):**
 1. Create an API key at console.anthropic.com (add a payment method; typical cost is a few cents per photo fill-in or diagnosis).
 2. Apps Script → ⚙️ **Project Settings** → **Script properties** → **Add script property**: name `ANTHROPIC_API_KEY`, value = your key → Save.
-3. Paste in the latest `google-apps-script.js`, save, then run **`setupAutomations`** once (▶ Run → allow the new permissions). This turns on automatic diagnosis every 10 minutes and the 7am briefing. Re-run it any time — it replaces the old schedule rather than duplicating it.
+3. Paste in the latest `google-apps-script.js`, save, then run **`setupAutomations`** once (▶ Run → allow the new permissions). This turns on automatic diagnosis every 10 minutes, the image finder, follow-up drafts at 6am and the 7am briefing. Re-run it any time — it replaces the old schedule rather than duplicating it.
 4. **Deploy → Manage deployments → ✏️ → New version → Deploy.**
 
-To turn either automation off, open ⏰ **Triggers** in Apps Script and delete the `autoTriageRepairs` or `sendDailyBriefing` trigger. The briefing works without an API key too — it just skips the AI "top priorities".
+To turn an automation off, open ⏰ **Triggers** in Apps Script and delete its trigger (`autoTriageRepairs`, `autoFindImages`, `generateFollowups` or `sendDailyBriefing`). The briefing works without an API key too — it just skips the AI "top priorities".
 
 ---
 
@@ -140,11 +145,14 @@ oceanside-appliance/
 │   ├── main.js             — Nav, scroll effects, repair form
 │   ├── site.js             — Nav + cart count on product/service pages
 │   ├── product-page.js     — Product page and "in stock" grids
+│   ├── chat.js             — "Ask us" website chat
 │   └── logo.js             — Logo for the staff panel
 ├── staff-9k2x/             — Staff panel (not linked publicly, noindex)
 │   ├── admin.js            — Data sync, dashboard, tables, ledger, invoices
-│   └── admin-tools.js      — Product editor, photos, listings, record sale, detail views
+│   ├── admin-tools.js      — Product editor, photos, listings, record sale, detail views, follow-ups
+│   └── bulk-import.js      — Bulk add from photos
 ├── google-apps-script.js   — Paste into Apps Script (see setup above)
+├── inbox-assistant.js      — Optional: paste into a script in the business Gmail account
 ├── robots.txt / sitemap.xml
 └── netlify.toml / .htaccess — Security headers (only used if hosted on Netlify / Apache)
 ```
