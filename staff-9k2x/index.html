@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="../css/styles.css?v=10" />
-  <link rel="stylesheet" href="admin.css?v=10" />
+  <link rel="stylesheet" href="../css/styles.css?v=11" />
+  <link rel="stylesheet" href="admin.css?v=11" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -159,6 +159,15 @@
         </div>
       </div>
 
+      <!-- AI follow-up drafts -->
+      <div class="admin-card fu-card" id="followupsCard">
+        <div class="card-header">
+          <div class="card-title">Follow-ups to send <span class="fu-count" id="fuCount"></span></div>
+          <button class="card-btn ai" id="fuDraftBtn" onclick="draftFollowupsNow(this)"><svg class="ic"><use href="../img/icons.svg#i-sparkles"/></svg> Draft follow-ups now</button>
+        </div>
+        <div id="followupsList"></div>
+      </div>
+
       <div class="admin-grid-2">
         <div class="admin-card">
           <div class="card-header">
@@ -298,18 +307,19 @@
     <!-- ── INVENTORY TAB ── -->
     <div class="admin-tab" id="tab-inventory">
       <div class="admin-card">
-        <div class="card-header">
+        <div class="card-header inv-header">
           <div class="card-title">Inventory</div>
-          <div class="card-tools">
-            <input type="search" class="table-search" id="inventorySearch" placeholder="Search products…" oninput="renderInventory()" />
+          <input type="search" class="table-search" id="inventorySearch" placeholder="Search products…" oninput="renderInventory()" />
+          <div class="card-tools inv-actions">
             <button class="card-btn ai" onclick="openBulkImport()"><svg class="ic"><use href="../img/icons.svg#i-camera"/></svg> Bulk add from photos</button>
             <button class="card-btn primary" onclick="openProductEditor()"><svg class="ic"><use href="../img/icons.svg#i-plus"/></svg> Add Product</button>
-            <button class="card-btn primary" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save All</button>
-            <button class="card-btn primary" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
+            <span class="inv-actions-gap"></span>
+            <button class="card-btn" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save All</button>
+            <button class="card-btn" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
             <button class="card-btn" onclick="exportCSV('inventory')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> CSV</button>
           </div>
         </div>
-        <table class="admin-table">
+        <table class="admin-table inv-table">
           <thead><tr><th></th><th>Product</th><th>Condition</th><th>Location</th><th>Price ($)</th><th>Stock</th><th>Actions</th></tr></thead>
           <tbody id="inventoryTbody"></tbody>
         </table>
@@ -344,9 +354,9 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=10"></script>
-<script src="admin-tools.js?v=10"></script>
-<script src="bulk-import.js?v=10"></script>
+<script src="admin.js?v=11"></script>
+<script src="admin-tools.js?v=11"></script>
+<script src="bulk-import.js?v=11"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

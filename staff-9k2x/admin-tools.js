@@ -746,3 +746,86 @@ async function sendBriefingNow(btn) {
     if (err.code === 'unauthorized') handleApiError(err, 'Briefing'); else showAdminToast('⚠️ ' + err.message);
   } finally { btn.disabled = false; btn.innerHTML = label; }
 }
+
+// ─── FOLLOW-UPS (AI drafts, sent by you) ───
+function renderFollowups() {
+  const list = document.getElementById('followupsList');
+  if (!list) return;
+  const open = getStore('followups').filter(f => f.status === 'open')
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  document.getElementById('fuCount').textContent = open.length ? open.length : '';
+  if (!open.length) {
+    list.innerHTML = `<div class="fu-empty">${ic('check-circle')} Nothing to follow up on. Each morning the assistant drafts check-ins for finished repairs and sales, and reminders for reservations and viewing requests.</div>`;
+    return;
+  }
+  list.innerHTML = open.map(f => {
+    const id = esc(f.id);
+    return `<div class="fu-item" data-id="${id}">
+      <div class="fu-top">
+        <strong>${esc(f.customer || 'Customer')}</strong>
+        <span class="fu-kind">${esc(f.kindLabel || '')}</span>
+        <span class="fu-about">${esc(f.about || '')}</span>
+      </div>
+      <textarea class="fu-msg" id="fumsg_${id}" rows="3" aria-label="Message to ${esc(f.customer)}">${esc(f.message)}</textarea>
+      <div class="fu-actions">
+        ${f.phone ? `<button class="card-btn primary" onclick="sendFollowup('${id}','sms')">${ic('phone')} Text ${esc(f.phone)}</button>` : ''}
+        ${f.email ? `<button class="card-btn" onclick="sendFollowup('${id}','email')">${ic('mail')} Email</button>` : ''}
+        <button class="card-btn" onclick="sendFollowup('${id}','copy')">${ic('copy')} Copy</button>
+        <span class="fu-spacer"></span>
+        <button class="card-btn" onclick="closeFollowup('${id}','sent')" title="I sent it">${ic('check')} Done</button>
+        <button class="card-btn" onclick="closeFollowup('${id}','skipped')" title="Don't send">${ic('x')} Skip</button>
+      </div>
+    </div>`;
+  }).join('');
+  // Grow each box to fit its message so nothing is hidden on small screens
+  list.querySelectorAll('.fu-msg').forEach(t => {
+    const fit = () => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; };
+    fit(); t.addEventListener('input', fit);
+  });
+}
+
+function followupText(id) { return (document.getElementById('fumsg_' + id)?.value || '').trim(); }
+
+async function sendFollowup(id, how) {
+  const f = getStore('followups').find(x => x.id === id);
+  if (!f) return;
+  const text = followupText(id);
+  if (how === 'copy') {
+    try { await navigator.clipboard.writeText(text); showAdminToast('📋 Copied — paste it into your texts'); }
+    catch { prompt('Copy this message:', text); }
+    return;
+  }
+  if (how === 'sms') {
+    // "?&body=" works on both iPhone and Android
+    location.href = `sms:${String(f.phone).replace(/[^\d+]/g, '')}?&body=${encodeURIComponent(text)}`;
+  } else {
+    location.href = `mailto:${encodeURIComponent(f.email)}?subject=${encodeURIComponent('Oceanside Appliance')}&body=${encodeURIComponent(text)}`;
+  }
+  setTimeout(() => {
+    if (confirm('Did you send it? Tap OK to mark this follow-up as done.')) closeFollowup(id, 'sent');
+  }, 1500);
+}
+
+async function closeFollowup(id, status) {
+  const all = getStore('followups');
+  const f = all.find(x => x.id === id);
+  if (!f) return;
+  const message = followupText(id) || f.message;
+  Object.assign(f, { status, message, closedAt: new Date().toISOString() });
+  setStore('followups', all);
+  renderFollowups();
+  await saveRemote('followups', [{ id, status, message, closedAt: f.closedAt }]);
+}
+
+async function draftFollowupsNow(btn) {
+  btn.disabled = true;
+  const label = btn.innerHTML;
+  btn.innerHTML = `${ic('sparkles')} Drafting…`;
+  try {
+    const res = await apiPost('admin_followups');
+    await pullFromSheets({ silent: true });
+    showAdminToast(res.created ? `✨ ${res.created} new follow-up${res.created > 1 ? 's' : ''} drafted` : 'Nothing new to follow up on right now');
+  } catch (err) {
+    if (err.code === 'unauthorized') handleApiError(err, 'Follow-ups'); else showAdminToast('⚠️ ' + err.message);
+  } finally { btn.disabled = false; btn.innerHTML = label; }
+}

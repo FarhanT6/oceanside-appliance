@@ -12,7 +12,7 @@ import html, json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SITE_URL = 'https://farhant6.github.io/oceanside-appliance/'
-VERSION = '6'  # bump to make browsers fetch fresh CSS/JS
+VERSION = '7'  # bump to make browsers fetch fresh CSS/JS
 
 index = (ROOT / 'index.html').read_text()
 sprite = index[index.index('<!-- ======== ICON SPRITE'):index.index('<!-- ======== NAVBAR')]
@@ -127,6 +127,7 @@ def page(*, path, title, description, body, scripts='', canonical=None, extra_he
 <script src="{base}js/core.js?v={VERSION}"></script>
 <script src="{base}js/site.js?v={VERSION}"></script>
 {scripts}
+<script src="{base}js/chat.js?v={VERSION}"></script>
 </body>
 </html>
 '''

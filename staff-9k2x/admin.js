@@ -59,9 +59,9 @@ function getAdminKey() { return localStorage.getItem('oa_admin_key') || ''; }
 // Local store key for each Sheets collection
 const COLLECTION_STORE = {
   inventory: 'inventory', sales: 'sales', repairs: 'repairs',
-  views: 'view_requests', repairRevenue: 'repair_revenue'
+  views: 'view_requests', repairRevenue: 'repair_revenue', followups: 'followups'
 };
-const COLLECTION_ID = { inventory: 'id', sales: 'orderId', repairs: 'ticketId', views: 'requestId', repairRevenue: 'id' };
+const COLLECTION_ID = { inventory: 'id', sales: 'orderId', repairs: 'ticketId', views: 'requestId', repairRevenue: 'id', followups: 'id' };
 
 let sheetsState = 'idle'; // idle | ok | error | nokey
 
@@ -200,6 +200,7 @@ function renderDashboard() {
   `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No sales yet</td></tr>';
 
   renderViewRequests();
+  renderFollowups();
 
   const recentRepairs = [...repairs].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
   document.getElementById('recentRepairsTbody').innerHTML = recentRepairs.map(r => `
@@ -401,22 +402,22 @@ function renderInventory() {
     const img = String(p.imageUrl || '').split(/[\s,]+/).filter(Boolean)[0] || String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean)[0];
     const noWeb = !String(p.imageUrl || '').trim();
     return `<tr class="${p.stock <= 0 ? 'faded' : ''}">
-      <td><button class="inv-thumb" onclick="openProductEditor('${id}')" title="Edit / add photos">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : ic('camera')}</button></td>
-      <td class="wrap">
+      <td class="c-thumb"><button class="inv-thumb" onclick="openProductEditor('${id}')" title="Edit / add photos">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : ic('camera')}</button></td>
+      <td class="wrap c-name">
         <div style="font-weight:600;color:var(--navy)">${esc(p.name)}${p.draft ? ' <span class="draft-tag" title="Hidden from the website until you publish it">Draft</span>' : ''}${p.imagesAutoPicked ? ' <span class="draft-tag img" title="Website images were picked automatically — open to review">Check images</span>' : ''}${noWeb ? ' <span class="draft-tag img" title="No website image yet — customers see an icon">No web image</span>' : ''}</div>
         <div style="font-size:.74rem;color:var(--gray-mid)">${esc([p.brand, p.category, p.model].filter(Boolean).join(' · '))}</div>
       </td>
-      <td><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>
-      <td style="color:var(--gray-dark)">${esc(p.storageLocation) || '—'}</td>
-      <td><input type="number" id="price_${id}" value="${esc(p.price)}" min="0" class="mini-input" style="width:84px" /></td>
-      <td>
+      <td class="c-cond"><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>
+      <td class="c-loc" style="color:var(--gray-dark)">${esc(p.storageLocation) || '—'}</td>
+      <td class="c-price" data-label="Price $"><input type="number" inputmode="decimal" id="price_${id}" value="${esc(p.price)}" min="0" class="mini-input" style="width:84px" /></td>
+      <td class="c-stock" data-label="Stock">
         <div class="stepper">
           <button onclick="adjustStock('${id}',-1)" aria-label="Less">${ic('minus')}</button>
-          <input type="number" id="stock_${id}" value="${esc(p.stock)}" min="0" class="mini-input" />
+          <input type="number" inputmode="numeric" id="stock_${id}" value="${esc(p.stock)}" min="0" class="mini-input" />
           <button onclick="adjustStock('${id}',1)" aria-label="More">${ic('plus')}</button>
         </div>
       </td>
-      <td class="row-actions">
+      <td class="row-actions c-act">
         <button class="card-btn small" onclick="saveInventoryRow('${id}')">Save</button>
         <button class="action-btn" onclick="openProductEditor('${id}')" title="Edit details & photos">${ic('edit')}</button>
         <button class="action-btn" onclick="openListing('${id}')" title="Marketplace listing">${ic('megaphone')}</button>
