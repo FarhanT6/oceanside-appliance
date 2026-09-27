@@ -1043,7 +1043,8 @@ function sendDailyBriefing() {
   const b = buildBriefing();
   const priorities = briefingPriorities(b);
   const admin = (PropertiesService.getScriptProperties().getProperty('SITE_URL') || 'https://farhant6.github.io/oceanside-appliance/') + 'staff-9k2x/';
-  const sec = (title, rows, empty) => `<h3 style="font:600 15px Georgia,serif;color:#1a2e44;margin:22px 0 8px">${title}</h3>` +
+  const text = [];
+  const sec = (title, rows, empty) => (text.push('', htmlToText(title).replace(/^[^A-Za-z]+/, '').toUpperCase(), ...(rows.length ? rows.map(r => '- ' + htmlToText(r)) : [empty])), '') + `<h3 style="font:600 15px Georgia,serif;color:#1a2e44;margin:22px 0 8px">${title}</h3>` +
     (rows.length ? `<ul style="margin:0;padding-left:18px;color:#3d5166;font:14px/1.6 Arial,sans-serif">${rows.map(r => `<li>${r}</li>`).join('')}</ul>`
                  : `<p style="margin:0;color:#8fa3b8;font:14px Arial,sans-serif">${empty}</p>`);
   const stat = (label, value) => `<td style="padding:12px 14px;background:#f3f8fd;border-radius:10px;text-align:center"><div style="font:700 20px Georgia,serif;color:#1a2e44">${value}</div><div style="font:11px Arial,sans-serif;color:#6f849a;text-transform:uppercase;letter-spacing:.06em">${label}</div></td>`;
@@ -1069,7 +1070,16 @@ function sendDailyBriefing() {
     ${sec('🏷 Listed 30+ days — consider a price drop', b.stale.map(x => `${htmlEsc(x.p.name)} — ${money0(x.p.price)}, listed ${x.days} days → try ${money0(Math.round(x.p.price * (x.days >= 60 ? 0.85 : 0.9) / 5) * 5)}`), `None — ${b.inStock} item${b.inStock === 1 ? '' : 's'} in stock, all listed recently.`)}
     <p style="margin-top:26px"><a href="${admin}" style="display:inline-block;background:#1a7fc1;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font:600 14px Arial,sans-serif">Open the staff panel</a></p>
   </div>`;
-  MailApp.sendEmail({ to: NOTIFY_EMAIL, subject: `☀️ Oceanside Appliance — ${Utilities.formatDate(new Date(), 'America/Los_Angeles', 'EEE MMM d')} briefing`, htmlBody: html, body: 'Your daily briefing is best viewed in an email app that shows HTML.' });
+  // A real plain-text part and a plain subject keep Gmail from filing this as spam.
+  const body = [`Oceanside Appliance daily briefing, ${Utilities.formatDate(new Date(), 'America/Los_Angeles', 'EEEE, MMMM d')}`, '',
+    `Yesterday: ${money0(b.rev.yesterday)} | This month: ${money0(b.rev.month)} | New orders: ${b.newOrders.length} | New repairs: ${b.newRepairs.length}`,
+    ...(b.safety.length ? ['', 'SAFETY: ' + b.safety.map(r => r.ticketId + ' - ' + r.applianceType + ' (' + r.firstName + ')').join(', ')] : []),
+    ...text, '', 'Staff panel: ' + admin].join('\n');
+  MailApp.sendEmail({ to: NOTIFY_EMAIL, name: 'Oceanside Appliance', subject: `Oceanside Appliance daily briefing, ${Utilities.formatDate(new Date(), 'America/Los_Angeles', 'EEE MMM d')}`, htmlBody: html, body: body });
+}
+
+function htmlToText(h) {
+  return String(h).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 }
 
 // ▶ Runs every 10 minutes once setupAutomations() has been run.
@@ -1175,7 +1185,7 @@ function formatStamp(v) {
 function notifyOwner(subject, lines, replyTo) {
   if (!SEND_OWNER_EMAILS || !NOTIFY_EMAIL) return;
   try {
-    const opts = { to: NOTIFY_EMAIL, subject: subject, body: lines.join('\n') };
+    const opts = { to: NOTIFY_EMAIL, name: 'Oceanside Appliance', subject: subject, body: lines.join('\n') };
     if (replyTo && validEmail(replyTo)) opts.replyTo = replyTo;
     MailApp.sendEmail(opts);
   } catch (err) { /* never block a customer request on email */ }
