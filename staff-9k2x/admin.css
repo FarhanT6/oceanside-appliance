@@ -635,6 +635,8 @@
 .mini-spin { width: 12px; height: 12px; border-width: 2px; display: inline-block; vertical-align: -1px; margin-right: .3rem; }
 .bi-strip { display: flex; flex-wrap: wrap; gap: 4px; }
 .bi-strip img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; }
+.bi-ph { width: 56px; height: 56px; border-radius: 6px; background: var(--gray-light); animation: biPulse 1.2s ease-in-out infinite; }
+@keyframes biPulse { 50% { opacity: .5; } }
 .bi-summary { display: flex; gap: .5rem; font-size: .88rem; color: #4a3a8a; background: #f6f1ff; border-radius: 10px; padding: .7rem .85rem; line-height: 1.5; }
 .bi-summary .ic { color: #7c5ce0; flex-shrink: 0; margin-top: .15em; }
 #biGroups { display: flex; flex-direction: column; gap: .9rem; }
