@@ -80,9 +80,9 @@ function chunkByGaps(items, max = 24) {
 
 // ─── The importer ───
 function openBulkImport() {
-  let lastLoc = '';
-  try { lastLoc = localStorage.getItem('oa_last_location') || ''; } catch {}
-  const S = { items: [], groups: [], uploading: 0, phase: 'pick', location: lastLoc };
+  let lastLoc = '', autoPrice = true;
+  try { lastLoc = localStorage.getItem('oa_last_location') || ''; autoPrice = localStorage.getItem('oa_auto_price') !== 'off'; } catch {}
+  const S = { items: [], groups: [], uploading: 0, phase: 'pick', location: lastLoc, autoPrice };
 
   const m = openAdminModal({
     title: 'Bulk add from photos',
@@ -201,6 +201,45 @@ function openBulkImport() {
     if (failed) showAdminToast(`⚠️ ${failed} photo${failed > 1 ? 's' : ''} didn't upload and will be left out`);
     await runPool(S.groups, 2, readDetails);
     status('');
+    mergeSameModel();
+    if (S.autoPrice) await runPool(S.groups.filter(g => g.keep && !g.f.priceResearch), 2, researchPrice);
+  }
+
+  // Neighbouring groups that turned out to have the same model number are one appliance
+  // photographed in two bursts (e.g. in the box, then unboxed) — join them.
+  function mergeSameModel() {
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    let merged = 0;
+    for (let n = S.groups.length - 1; n > 0; n--) {
+      const g = S.groups[n], prev = S.groups[n - 1];
+      if (!g.keep || !prev.keep) continue;
+      const a = norm(g.f.model), b = norm(prev.f.model);
+      if (a.length < 5 || a !== b) continue;
+      prev.idx = [...prev.idx, ...g.idx].sort((x, y) => x - y);
+      prev.labels = [...prev.labels, ...g.labels];
+      prev.mergedNote = true;
+      if (!prev.f.desc && g.f.desc) prev.f.desc = g.f.desc;
+      S.groups.splice(n, 1);
+      merged++;
+    }
+    if (merged) {
+      renderReview(); updateFooter();
+      showAdminToast(`🔗 Joined ${merged} duplicate group${merged > 1 ? 's' : ''} with the same model number — use ✂ if they were really separate units`);
+    }
+  }
+
+  async function researchPrice(g) {
+    if (!g.keep) return;
+    if (!g.f.model && !g.f.name) return;
+    g.pricing = 'busy'; renderCard(g);
+    try {
+      const { pricing: r } = await apiPost('admin_ai_price', { product: { ...g.f } });
+      if (r.suggestedPrice && !g.edited.has('price')) g.f.price = Math.round(r.suggestedPrice);
+      if (r.msrp && !g.f.msrp) g.f.msrp = Math.round(r.msrp);
+      if (r.suggestedPrice || r.rangeLow) g.f.priceResearch = priceResearchFrom(r);
+      g.pricing = r.suggestedPrice || r.rangeLow ? 'done' : 'none';
+    } catch (err) { g.pricing = 'error'; g.priceErr = err.message; }
+    renderCard(g);
   }
   async function readDetails(g) {
     if (!g.keep) return;
@@ -225,6 +264,7 @@ function openBulkImport() {
     const kept = S.groups.filter(g => g.keep).length;
     body.innerHTML = `
       <div class="bi-summary">${ic('sparkles')}<span>Found <strong>${kept} appliance${kept === 1 ? '' : 's'}</strong> in ${S.items.length} photos. Check each group — use the arrows under a photo to move it, <strong>✂</strong> to start a new appliance from that photo, or <strong>Merge</strong> to join a group with the one above.</span></div>
+      <label class="check-line bi-auto-price"><input type="checkbox" id="biAutoPrice" ${S.autoPrice ? 'checked' : ''} /> Research prices automatically <span class="hint">(fills in the price + saves the market range · about 10–30¢ each)</span></label>
       <label class="af bi-loc-all"><span class="af-label">Storage location for all <span class="hint">staff only · you can change it per appliance below</span></span>
         <input id="biLocAll" value="${esc(S.location || '')}" placeholder="e.g. Ramona, Tremont, Unit A" /></label>
       <div id="biGroups">${S.groups.map((g, n) => `<div class="bi-card" data-key="${g.key}"></div>`).join('')}</div>`;
@@ -277,7 +317,11 @@ function openBulkImport() {
         <label class="af bi-loc"><span class="af-label">Location <span class="hint">staff only</span></span><input data-f="storageLocation" value="${esc(g.f.storageLocation)}" placeholder="e.g. Ramona" /></label>
         <label class="af bi-desc"><span class="af-label">Description</span><textarea data-f="desc" rows="2">${esc(g.f.desc)}</textarea></label>
       </div>
-      ${g.f.priceResearch ? priceRangeBox(g.f.priceResearch) : ''}
+      ${g.mergedNote ? `<div class="ai-note">${ic('sparkles')}<span>Joined two photo groups with the same model number. If these are two separate units, use ✂ to split them.</span></div>` : ''}
+      ${g.f.priceResearch ? priceRangeBox(g.f.priceResearch)
+        : g.pricing === 'busy' ? `<div class="range-box empty"><span><span class="mini-spin"></span> Researching price online…</span></div>`
+        : g.pricing === 'none' ? `<div class="range-box empty"><span>Not enough price data found online — set the price yourself.</span></div>`
+        : g.pricing === 'error' ? `<div class="range-box empty"><span>Price research failed${g.priceErr ? ' — ' + esc(g.priceErr) : ''}. Tap “Research price” to try again.</span></div>` : ''}
       ${g.check ? `<div class="ai-note">${ic('sparkles')}<span>Double-check: ${esc(g.check)}</span></div>` : ''}
       <div class="bi-actions">
         <button type="button" class="ai-btn small" data-act="price">${ic('search')}<span>Research price</span></button>
@@ -286,6 +330,12 @@ function openBulkImport() {
   }
 
   // Field edits (no re-render, so typing isn't interrupted)
+  body.addEventListener('change', e => {
+    if (e.target.id !== 'biAutoPrice') return;
+    S.autoPrice = e.target.checked;
+    try { localStorage.setItem('oa_auto_price', S.autoPrice ? 'on' : 'off'); } catch {}
+    if (S.autoPrice && S.groups.every(g => g.ai !== 'reading' && g.ai !== 'waiting')) runPool(S.groups.filter(g => g.keep && !g.f.priceResearch && !g.pricing), 2, researchPrice);
+  });
   body.addEventListener('input', e => {
     if (e.target.id === 'biLocAll') {
       S.location = e.target.value;
@@ -344,18 +394,7 @@ function openBulkImport() {
       renderReview(); updateFooter();
       return readDetails(above);
     }
-    if (act === 'price') {
-      const note = card.querySelector('.bi-price-note');
-      btn.disabled = true; note.textContent = 'Searching prices… (up to a minute)';
-      try {
-        const { pricing: r } = await apiPost('admin_ai_price', { product: { ...g.f } });
-        if (r.suggestedPrice && !g.edited.has('price')) g.f.price = Math.round(r.suggestedPrice);
-        if (r.msrp) g.f.msrp = Math.round(r.msrp);
-        g.f.priceResearch = priceResearchFrom(r);
-        renderCard(g);
-        if (!r.suggestedPrice) card.querySelector('.bi-price-note').textContent = 'Not enough price data found.';
-      } catch (err) { note.textContent = '⚠️ ' + err.message; btn.disabled = false; }
-    }
+    if (act === 'price') return researchPrice(g);
   });
 
   function updateFooter() {
@@ -392,13 +431,17 @@ function openBulkImport() {
     const inv = getStore('inventory');
     setStore('inventory', [...inv, ...records]);
     syncStorefront();
-    saveRemote('inventory', records);
+    saveRemote('inventory', records, 'Bulk add');
     renderInventory(); renderDashboard();
     const live = records.filter(r => !r.draft).length, drafts = records.length - live;
     m.close();
-    showAdminToast(`✅ Added ${records.length} appliance${records.length === 1 ? '' : 's'}${live ? ` · ${live} live` : ''}${drafts ? ` · ${drafts} draft${drafts === 1 ? '' : 's'}` : ''} — now finding website images`);
-    // Start finding website images right away (one at a time, in the background)
-    setTimeout(() => findMissingWebImages(records.map(r => r.id)), 2500);
+    showAdminToast(`✅ Added ${records.length} appliance${records.length === 1 ? '' : 's'}${live ? ` · ${live} live` : ''}${drafts ? ` · ${drafts} draft${drafts === 1 ? '' : 's'}` : ''} — now finding website images${records.some(r => !r.priceResearch) ? ' and prices' : ''}`);
+    // Find website images (and any prices not researched yet) in the background, one at a time
+    setTimeout(() => {
+      findMissingWebImages(records.map(r => r.id));
+      const unpriced = records.filter(r => !r.priceResearch).map(r => r.id);
+      if (unpriced.length) researchMissingPrices(unpriced);
+    }, 2500);
   }
   m.$('#biDrafts').addEventListener('click', () => save(false));
   m.$('#biPublish').addEventListener('click', () => save(true));

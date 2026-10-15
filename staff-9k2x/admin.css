@@ -769,3 +769,12 @@
   .range-box { grid-template-columns: 1fr 1fr; }
   .inv-actions .card-btn[onclick^="findMissing"] { grid-column: span 3; }
 }
+.range-box.empty { display: block; border-style: dashed; border-color: var(--gray-light); background: var(--off-white); color: var(--gray-mid); font-size: .8rem; }
+.range-box.empty .mini-spin { vertical-align: -2px; margin-right: .3rem; }
+.inv-range.busy { color: #7c5ce0; font-style: italic; }
+.inv-range.none { color: var(--gray-mid); }
+.web-manual { display: flex; gap: .5rem; flex-wrap: wrap; }
+.web-manual .card-btn { flex: 1 1 auto; justify-content: center; padding: .55rem .7rem; }
+.upload-inline { cursor: pointer; }
+.web-tip { margin: .1rem 0 0; font-size: .74rem; }
+.bi-auto-price { display: flex; align-items: center; gap: .45rem; margin-top: .75rem; font-size: .85rem; color: var(--navy); flex-wrap: wrap; }

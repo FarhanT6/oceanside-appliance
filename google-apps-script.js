@@ -23,6 +23,7 @@
 //     POST {type:'admin_ai_find_images', key, product, refs} → AI agent: finds product images online
 //     POST {type:'admin_import_image', key, url}            → copies an online image into Drive
 //     POST {type:'admin_auto_images', key, id}              → AI: finds + saves website images now
+//     POST {type:'admin_auto_price', key, id}               → AI: researches + saves the price range now
 //     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //     POST {type:'admin_followups', key}                    → AI: drafts customer follow-ups now
 //     POST {type:'admin_ai_email', key, email}              → AI: drafts a reply to a customer email
@@ -216,6 +217,7 @@ function doPost(e) {
     if (type === 'admin_ai_group')     return jsonResponse(aiGroupPhotos(data));
     if (type === 'admin_ai_find_images') return jsonResponse({ success: true, candidates: findProductImages(data.product || {}, data.refs || []) });
     if (type === 'admin_auto_images')  return jsonResponse(autoImagesEndpoint(data));
+    if (type === 'admin_auto_price')   return jsonResponse(autoPriceEndpoint(data));
     if (type === 'admin_import_image') return jsonResponse(importImageFromUrl(data.url, data.name));
     if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_followups')    return jsonResponse(generateFollowups());
@@ -223,7 +225,7 @@ function doPost(e) {
     if (type === 'admin_upsert') {
       requireCollection(data.collection);
       return jsonResponse(withLock(() => {
-        upsertRecords(data.collection, Array.isArray(data.records) ? data.records : []);
+        upsertRecords(data.collection, Array.isArray(data.records) ? data.records : [], 'staff panel: ' + clean(data.reason, 60));
         appendLog('admin_upsert', data.collection + ' × ' + (data.records || []).length);
         return { success: true };
       }));
@@ -305,7 +307,10 @@ function placeOrder(d) {
   };
 
   // Decrement stock so nobody else can buy the same unit
-  resolved.forEach(r => { r.p.stock = Math.max(0, (r.p.stock || 0) - r.qty); r.p.updatedAt = order.timestamp; });
+  resolved.forEach(r => {
+    appendLog('stock_change', `${r.p.id} ${r.p.name}: ${r.p.stock || 0} → ${Math.max(0, (r.p.stock || 0) - r.qty)} (website order ${order.orderId})`);
+    r.p.stock = Math.max(0, (r.p.stock || 0) - r.qty); r.p.stockStatus = r.p.stock > 0 ? 'in-stock' : 'out'; r.p.updatedAt = order.timestamp;
+  });
   writeCollection('inventory', inventory);
 
   sales.push(order);
@@ -420,16 +425,27 @@ function readCollection(name) {
     let rec;
     if (dataCol >= 0 && row[dataCol]) {
       try { rec = JSON.parse(row[dataCol]); } catch (err) { rec = {}; }
+      const savedStock = rec.stock;
       def.cols.forEach(col => {
         const [header, key, flags] = col;
         if (flags & RO) return;
         const c = headers.indexOf(header);
-        if (c >= 0) rec[key] = coerce(row[c], flags);
+        if (c < 0) return;
+        // A blank number cell means "not filled in", not zero — keep the saved value
+        if ((flags & (NUM | INT)) && (row[c] === '' || row[c] === null) && rec[key] !== undefined) return;
+        rec[key] = coerce(row[c], flags);
       });
+      if (name === 'inventory' && savedStock !== undefined && Number(savedStock) !== rec.stock) {
+        // Someone changed Stock Qty directly in the sheet — remember it so the change gets logged
+        Object.defineProperty(rec, '_sheetEditFrom', { value: Number(savedStock), enumerable: false });
+      }
     } else {
       rec = fromLegacyRow(name, def, headers, row, r);
     }
-    if (rec && rec[def.idKey]) records.push(rec);
+    if (rec && rec[def.idKey]) {
+      if (name === 'inventory') rec.stockStatus = (Number(rec.stock) || 0) > 0 ? 'in-stock' : 'out';
+      records.push(rec);
+    }
   }
   return records;
 }
@@ -509,19 +525,31 @@ function writeCollection(name, records) {
   sheet.hideColumns(width);
 }
 
-function upsertRecords(name, incoming) {
+function upsertRecords(name, incoming, source) {
   const def = COLLECTIONS[name];
   const records = readCollection(name);
   const index = {};
   records.forEach((r, i) => { index[r[def.idKey]] = i; });
+  const stockLog = [];
+  if (name === 'inventory') records.forEach(r => {
+    if (r._sheetEditFrom !== undefined) stockLog.push(`${r.id} ${r.name}: ${r._sheetEditFrom} → ${r.stock} (edited in the Sheet)`);
+  });
   incoming.forEach(rec => {
     if (!rec || !rec[def.idKey]) return;
-    if (name === 'inventory') rec.updatedAt = new Date().toISOString();
     const i = index[rec[def.idKey]];
+    if (name === 'inventory') {
+      rec.updatedAt = new Date().toISOString();
+      if (rec.stock !== undefined) rec.stockStatus = (Number(rec.stock) || 0) > 0 ? 'in-stock' : 'out';
+      const before = i === undefined ? null : Number(records[i].stock) || 0;
+      if (rec.stock !== undefined && before !== null && before !== (Number(rec.stock) || 0)) {
+        stockLog.push(`${rec.id} ${rec.name || records[i].name}: ${before} → ${rec.stock} (${source || 'update'})`);
+      }
+    }
     if (i === undefined) { index[rec[def.idKey]] = records.length; records.push(rec); }
     else records[i] = Object.assign({}, records[i], rec);
   });
   writeCollection(name, records);
+  stockLog.forEach(line => appendLog('stock_change', line));
 }
 
 function deleteRecords(name, ids) {
@@ -881,7 +909,7 @@ function autoImagesFor(p) {
   } catch (err) {
     update.imageSearchNote = String(err && err.message || err).slice(0, 200);
   }
-  withLock(() => upsertRecords('inventory', [update]));
+  withLock(() => upsertRecords('inventory', [update], 'image finder'));
   return update;
 }
 
@@ -938,9 +966,12 @@ function aiGroupPhotos(d) {
     }),
     system: 'You sort photos taken at an appliance store. The photos are in the order they were taken; the staff member ' +
       'photographed one appliance from several angles (in and out of the box, close-ups of stickers and labels) before moving to the next. ' +
-      'Group consecutive photos that show the same physical appliance. Start a new group when the appliance clearly changes ' +
-      '(different type, color, finish, model, box, or surroundings) — a long time gap is a strong hint of a new appliance. ' +
-      'A close-up of a sticker or box label belongs with the appliance photographed right before or after it. ' +
+      'Group consecutive photos that show the same physical appliance. Typically each appliance has 2-6 photos: the box or unit, ' +
+      'other sides, and close-ups of the model sticker, box label, barcode or price tag. Close-ups, labels, tags and partial views ALWAYS ' +
+      'belong with the appliance photographed next to them — never make a group out of a close-up alone. Unboxed and boxed shots of the ' +
+      'same model are the same appliance. Start a new group only when the appliance clearly changes (different type, color, finish, ' +
+      'model number, box, or surroundings); a long time gap is a strong hint of a new appliance, a gap of under a minute usually is not. ' +
+      'Splitting one appliance into two groups is a worse mistake than an occasional merge. ' +
       'Every photo index must appear in exactly one group. Keep groups in photo order. If unsure, keep a photo with its neighbors and lower the confidence.',
     content: content
   });
@@ -1033,6 +1064,47 @@ function aiPriceResearch(d) {
     .slice(0, 8)
     .map(c => ({ title: c.title, price: c.price, kind: c.kind, url: c.url || '' }));
   return { success: true, pricing: result, at: new Date().toISOString() };
+}
+
+// Research one product's price and save it (range for reference; fills the price only if none is set)
+function autoPriceFor(p) {
+  const update = { id: p.id, priceResearchAt: new Date().toISOString(), priceResearchTries: (Number(p.priceResearchTries) || 0) + 1 };
+  try {
+    const res = aiPriceResearch({ product: p });
+    if (!res.success) throw new Error(res.error);
+    const r = res.pricing;
+    if (r.suggestedPrice || r.rangeLow) {
+      update.priceResearch = { suggested: Math.round(r.suggestedPrice) || 0, low: Math.round(r.rangeLow) || 0, high: Math.round(r.rangeHigh) || 0,
+        msrp: Math.round(r.msrp) || 0, confidence: r.confidence || '', at: res.at };
+      if (!(Number(p.price) > 0) && r.suggestedPrice) update.price = Math.round(r.suggestedPrice);
+      if (!(Number(p.msrp) > 0) && r.msrp) update.msrp = Math.round(r.msrp);
+      update.priceResearchNote = '';
+    } else {
+      update.priceResearchNote = 'Not enough price data found online.';
+    }
+  } catch (err) {
+    update.priceResearchNote = String(err && err.message || err).slice(0, 200);
+  }
+  withLock(() => upsertRecords('inventory', [update], 'price research'));
+  return update;
+}
+
+// ▶ Runs every 15 minutes once setupAutomations() has been run:
+// researches prices for in-stock products that haven't been researched yet (3 per run).
+function autoResearchPrices() {
+  if (!PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY')) return;
+  const now = Date.now();
+  readCollection('inventory')
+    .filter(p => !p.priceResearch && (p.model || p.name) && (Number(p.stock) || 0) > 0)
+    .filter(p => !p.priceResearchAt || ((Number(p.priceResearchTries) || 1) < 2 && now - new Date(p.priceResearchAt).getTime() > 6 * 3600000))
+    .slice(0, 3)
+    .forEach(autoPriceFor);
+}
+
+function autoPriceEndpoint(d) {
+  const p = readCollection('inventory').find(x => x.id === d.id);
+  if (!p) return fail('Product not found.');
+  return { success: true, update: autoPriceFor(p) };
 }
 
 // ─── MORNING BRIEFING ───
@@ -1186,13 +1258,14 @@ function autoTriageRepairs() {
 // ▶ Run once from the editor to turn on the automations (safe to run again).
 function setupAutomations() {
   ScriptApp.getProjectTriggers()
-    .filter(t => ['autoTriageRepairs', 'sendDailyBriefing', 'autoFindImages', 'generateFollowups'].indexOf(t.getHandlerFunction()) >= 0)
+    .filter(t => ['autoTriageRepairs', 'sendDailyBriefing', 'autoFindImages', 'generateFollowups', 'autoResearchPrices'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('autoTriageRepairs').timeBased().everyMinutes(10).create();
   ScriptApp.newTrigger('sendDailyBriefing').timeBased().everyDays(1).atHour(7).inTimezone('America/Los_Angeles').create();
   ScriptApp.newTrigger('autoFindImages').timeBased().everyMinutes(15).create();
+  ScriptApp.newTrigger('autoResearchPrices').timeBased().everyMinutes(15).create();
   ScriptApp.newTrigger('generateFollowups').timeBased().everyDays(1).atHour(6).inTimezone('America/Los_Angeles').create();
-  Logger.log('On: repair diagnosis every 10 min, website image finder every 15 min, follow-up drafts daily at 6am, morning briefing daily at 7am Pacific.');
+  Logger.log('On: repair diagnosis every 10 min, website image finder + price research every 15 min, follow-up drafts daily at 6am, morning briefing daily at 7am Pacific.');
 }
 
 // ─── SHARED FACTS FOR THE CUSTOMER-FACING ASSISTANTS ───
@@ -1457,7 +1530,8 @@ function initialSetup() {
 function withLock(fn) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  try { return fn(); } finally { lock.releaseLock(); }
+  // Flush before unlocking: Sheets buffers writes, and the next request must see them
+  try { const out = fn(); SpreadsheetApp.flush(); return out; } finally { lock.releaseLock(); }
 }
 
 function requireCollection(name) {
