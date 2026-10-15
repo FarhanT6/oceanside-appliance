@@ -152,14 +152,14 @@ function openProductEditor(id) {
             <button type="button" class="ai-btn" id="peFind">${ic('search')}<span>Find product images online</span></button>
             <div id="peFindOut"></div>
             <div class="web-manual">
-              <button type="button" class="card-btn" id="peGoogle">${ic('external')} Search Google Images</button>
+              <button type="button" class="card-btn" id="peGoogle">${ic('external')} Search Google</button>
               <label class="card-btn upload-inline">${ic('camera')} Upload image<input type="file" id="peWebFiles" accept="image/*" multiple hidden /></label>
             </div>
             <div class="link-add">
               <input type="url" id="peLink" placeholder="…or paste an image link" />
               <button type="button" class="card-btn small" id="peLinkAdd">Add</button>
             </div>
-            <p class="hint web-tip">Found one yourself? Copy the image address (long-press the image on a phone) and paste it here, or save it and use “Upload image”.</p>
+            <p class="hint web-tip">“Search Google” looks up the model number in quotes — open Shopping or a store page, then copy the image address (long-press on a phone) and paste it here, or save it and use “Upload image”.</p>
             <label class="check-line"><input type="checkbox" id="pe-stocklabel" ${p.stockPhotos ? 'checked' : ''} /> Show a “Stock photo” label on the website</label>
           </div>
           <div class="pe-sec">
@@ -228,7 +228,7 @@ function openProductEditor(id) {
           <button type="button" data-remove="${i}" aria-label="Remove image">${ic('x')}</button>
           <button type="button" data-move="${i}" data-dir="1" ${i === web.length - 1 ? 'disabled' : ''} aria-label="Move right">${ic('chevron-right')}</button>
         </div>
-      </div>`).join('') || '<div class="photo-empty">No website images yet — use “Find product images online” or “Search Google Images”.</div>';
+      </div>`).join('') || '<div class="photo-empty">No website images yet — use “Find product images online” or “Search Google”.</div>';
   }
   renderPhotos();
   renderWeb();
@@ -390,12 +390,12 @@ function openProductEditor(id) {
     if (um) { m.$('#pe-msrp').value = Math.round(+um.dataset.useMsrp); m.$('#pe-msrp').classList.add('ai-filled'); showAdminToast('✅ MSRP filled in — save to keep it'); }
   });
 
-  // Same as searching Google Images for "MODEL" yourself
+  // Same as googling "MODEL" Brand yourself — then pick an image from Shopping or a store page
   m.$('#peGoogle').addEventListener('click', () => {
     const model = m.$('#pe-model').value.trim(), brand = m.$('#pe-brand').value.trim(), name = m.$('#pe-name').value.trim();
     const q = model ? `"${model}"${brand ? ' ' + brand : ''}` : name;
     if (!q) return showAdminToast('⚠️ Enter the model number or name first');
-    window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q), '_blank', 'noopener');
+    window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank', 'noopener');
   });
   // Upload images saved from the web (e.g. to the phone's photo library)
   m.$('#peWebFiles').addEventListener('change', async e => {
