@@ -71,25 +71,36 @@ function openAdminModal({ title, body, footer = '', size = '', dismissable = tru
 }
 
 // ─── Photo upload (resized in the browser, stored in Google Drive) ───
+// Phone photos are ~12 megapixels (~50 MB each once opened), so every decode is
+// released straight away — otherwise Safari on iPhone runs out of memory.
 async function resizeToJpegBase64(file, max = 1600, quality = 0.82) {
-  let src, w, h;
+  let src, w, h, release;
   try {
     src = await createImageBitmap(file, { imageOrientation: 'from-image' });
     w = src.width; h = src.height;
+    release = () => src.close && src.close();
   } catch {
+    const url = URL.createObjectURL(file);
     src = await new Promise((res, rej) => {
       const img = new Image();
+      img.decoding = 'async';
       img.onload = () => res(img);
-      img.onerror = () => rej(new Error('This photo format isn’t supported by your browser. Try a JPG or PNG.'));
-      img.src = URL.createObjectURL(file);
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('This photo format isn’t supported by your browser. Try a JPG or PNG.')); };
+      img.src = url;
     });
     w = src.naturalWidth; h = src.naturalHeight;
+    release = () => { URL.revokeObjectURL(url); src.src = ''; };
   }
-  const scale = Math.min(1, max / Math.max(w, h));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
-  canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', quality).split(',')[1];
+  try {
+    const scale = Math.min(1, max / Math.max(w, h));
+    canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+    canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', quality).split(',')[1];
+  } finally {
+    release();
+    canvas.width = canvas.height = 0; // frees the canvas memory on iOS
+  }
 }
 
 async function uploadPhoto(file) {

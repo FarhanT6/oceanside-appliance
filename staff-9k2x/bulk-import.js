@@ -104,7 +104,7 @@ function openBulkImport() {
       <h3>Choose all the photos you want to add</h3>
       <p>Select them in one go — phone camera roll or a computer folder. They'll be sorted by when they were taken, grouped by appliance, and the model number is read from whichever photo shows the sticker or box label. These photos stay private (inventory only) — customers see product images found online.</p>
       <label class="upload-btn">${ic('camera')}<span>Choose photos</span><input type="file" id="biFiles" accept="image/*" multiple hidden /></label>
-      <p class="hint">Tip: photograph the model sticker or box label for each appliance. Up to about 200 photos at a time works well.</p>
+      <p class="hint">Tip: photograph the model sticker or box label for each appliance. On a phone, keep this screen open until the photos finish uploading.</p>
     </div>`;
   m.$('#biFiles').addEventListener('change', e => start([...e.target.files]));
 
@@ -115,21 +115,41 @@ function openBulkImport() {
     const step = t => { const el = m.$('#biStep'); if (el) el.textContent = t; };
     const sub = t => { const el = m.$('#biSub'); if (el) el.textContent = t; };
 
-    // Sort by time taken (then file name)
-    S.items = await Promise.all(files.map(async (file, n) => ({ file, n, time: await photoTakenAt(file), url: '', preview: URL.createObjectURL(file) })));
-    S.items.sort((a, b) => ((a.time || 0) - (b.time || 0)) || a.file.name.localeCompare(b.file.name, undefined, { numeric: true }));
-    m.$('#biStrip').innerHTML = S.items.map(it => `<img src="${it.preview}" alt="" />`).join('');
+    // Keep the phone screen awake so a big batch isn't interrupted
+    try { S.wake = await navigator.wakeLock?.request('screen'); } catch {}
 
-    // Full-size uploads run in the background while the AI groups previews
+    // Sort by time taken (then file name)
+    S.items = files.map((file, n) => ({ file, n, time: null, url: '', preview: '' }));
+    await runPool(S.items, 6, async it => { it.time = await photoTakenAt(it.file); });
+    S.items.sort((a, b) => ((a.time || 0) - (b.time || 0)) || a.file.name.localeCompare(b.file.name, undefined, { numeric: true }));
+    m.$('#biStrip').innerHTML = S.items.map((it, k) => `<span class="bi-ph" data-k="${k}"></span>`).join('');
+
+    // Small previews only (full-size photos would use too much memory on a phone).
+    // Two at a time; each one is shown as soon as it's ready.
+    step('Making previews…');
+    let made = 0;
+    await runPool(S.items, 2, async (it, k) => {
+      try {
+        it.thumb = await previewBase64(it.file);
+        it.preview = 'data:image/jpeg;base64,' + it.thumb;
+        const slot = m.$(`#biStrip [data-k="${k}"]`);
+        if (slot) slot.outerHTML = `<img src="${it.preview}" alt="" />`;
+      } catch (err) { it.error = err.message || 'Could not open photo'; }
+      sub(`${++made} of ${S.items.length}`);
+    });
+    sub('');
+    const unreadable = S.items.filter(it => it.error).length;
+    if (unreadable) showAdminToast(`⚠️ ${unreadable} photo${unreadable > 1 ? 's' : ''} couldn't be opened and ${unreadable > 1 ? 'were' : 'was'} left out`);
+    S.items = S.items.filter(it => !it.error);
+    if (!S.items.length) { m.close(); return; }
+
+    // Full-size uploads run in the background (two at a time) while the AI groups the previews
     S.uploading = S.items.length;
-    const uploads = runPool(S.items, 3, async it => {
+    const uploads = runPool(S.items, 2, async it => {
       try { it.url = await uploadPhoto(it.file); } catch (err) { it.error = err.message || 'Upload failed'; }
       S.uploading--;
       updateFooter();
     });
-
-    step('Making previews…');
-    await runPool(S.items, 4, async it => { it.thumb = await previewBase64(it.file); });
 
     step('Grouping photos by appliance…');
     const chunks = chunkByGaps(S.items);
@@ -176,6 +196,7 @@ function openBulkImport() {
   // ── Step 3: read details per group from full-size photos ──
   async function readAllDetails(uploadsDone) {
     await uploadsDone;
+    try { S.wake?.release(); } catch {}
     const failed = S.items.filter(it => it.error).length;
     if (failed) showAdminToast(`⚠️ ${failed} photo${failed > 1 ? 's' : ''} didn't upload and will be left out`);
     await runPool(S.groups, 2, readDetails);
