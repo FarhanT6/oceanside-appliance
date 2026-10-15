@@ -151,10 +151,15 @@ function openProductEditor(id) {
             <div class="photo-grid" id="peWeb"></div>
             <button type="button" class="ai-btn" id="peFind">${ic('search')}<span>Find product images online</span></button>
             <div id="peFindOut"></div>
+            <div class="web-manual">
+              <button type="button" class="card-btn" id="peGoogle">${ic('external')} Search Google Images</button>
+              <label class="card-btn upload-inline">${ic('camera')} Upload image<input type="file" id="peWebFiles" accept="image/*" multiple hidden /></label>
+            </div>
             <div class="link-add">
               <input type="url" id="peLink" placeholder="…or paste an image link" />
               <button type="button" class="card-btn small" id="peLinkAdd">Add</button>
             </div>
+            <p class="hint web-tip">Found one yourself? Copy the image address (long-press the image on a phone) and paste it here, or save it and use “Upload image”.</p>
             <label class="check-line"><input type="checkbox" id="pe-stocklabel" ${p.stockPhotos ? 'checked' : ''} /> Show a “Stock photo” label on the website</label>
           </div>
           <div class="pe-sec">
@@ -179,7 +184,7 @@ function openProductEditor(id) {
           <label class="af"><span class="af-label">Stock *</span><input id="pe-stock" type="number" min="0" step="1" value="${esc(p.stock ?? 1)}" /></label>
           <label class="af"><span class="af-label">MSRP / retail ($)</span><input id="pe-msrp" type="number" min="0" value="${esc(p.msrp || '')}" placeholder="Shows savings" /></label>
           <label class="af"><span class="af-label">Competitor price ($)</span><input id="pe-ref" type="number" min="0" value="${esc(p.refPrice || '')}" placeholder="e.g. Lowe's price" /></label>
-          <div class="af span2" id="peRange">${p.priceResearch ? priceRangeBox(p.priceResearch) : ''}</div>
+          <div class="af span2" id="peRange">${p.priceResearch ? priceRangeBox(p.priceResearch) : `<div class="range-box empty"><span>No price research yet${p.priceResearchNote ? ' — ' + esc(p.priceResearchNote) : ' — it runs automatically, or tap “Research the price online”.'}</span></div>`}</div>
           <div class="af span2 price-agent" id="pePrice">
             <button type="button" class="ai-btn" id="pePriceBtn">${ic('search')}<span>Research the price online</span></button>
             <span class="hint">Searches the web for new &amp; used prices of this model (about 10–30¢)</span>
@@ -223,7 +228,7 @@ function openProductEditor(id) {
           <button type="button" data-remove="${i}" aria-label="Remove image">${ic('x')}</button>
           <button type="button" data-move="${i}" data-dir="1" ${i === web.length - 1 ? 'disabled' : ''} aria-label="Move right">${ic('chevron-right')}</button>
         </div>
-      </div>`).join('') || '<div class="photo-empty">No website images yet — use “Find product images online”.</div>';
+      </div>`).join('') || '<div class="photo-empty">No website images yet — use “Find product images online” or “Search Google Images”.</div>';
   }
   renderPhotos();
   renderWeb();
@@ -347,7 +352,15 @@ function openProductEditor(id) {
     out.innerHTML = '';
     try {
       const { pricing: r } = await apiPost('admin_ai_price', { product });
-      if (r.suggestedPrice || r.rangeLow) { research = priceResearchFrom(r); m.$('#peRange').innerHTML = priceRangeBox(research); }
+      if (r.suggestedPrice || r.rangeLow) {
+        research = priceResearchFrom(r);
+        m.$('#peRange').innerHTML = priceRangeBox(research);
+        if (existing) { // keep the research even if this window is closed without saving
+          const all = getStore('inventory'); const rec = all.find(x => x.id === existing.id);
+          if (rec) { rec.priceResearch = research; setStore('inventory', all); renderInventory(); }
+          saveRemote('inventory', [{ id: existing.id, priceResearch: research }], 'price research');
+        }
+      }
       const conf = { high: ['High confidence', '#1e8449'], medium: ['Medium confidence', '#1a6fa8'], low: ['Low confidence — little data found', '#b9770e'] }[r.confidence] || ['', '#555'];
       out.innerHTML = `
         <div class="price-card">
@@ -377,10 +390,33 @@ function openProductEditor(id) {
     if (um) { m.$('#pe-msrp').value = Math.round(+um.dataset.useMsrp); m.$('#pe-msrp').classList.add('ai-filled'); showAdminToast('✅ MSRP filled in — save to keep it'); }
   });
 
-  m.$('#peLinkAdd').addEventListener('click', () => {
+  // Same as searching Google Images for "MODEL" yourself
+  m.$('#peGoogle').addEventListener('click', () => {
+    const model = m.$('#pe-model').value.trim(), brand = m.$('#pe-brand').value.trim(), name = m.$('#pe-name').value.trim();
+    const q = model ? `"${model}"${brand ? ' ' + brand : ''}` : name;
+    if (!q) return showAdminToast('⚠️ Enter the model number or name first');
+    window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q), '_blank', 'noopener');
+  });
+  // Upload images saved from the web (e.g. to the phone's photo library)
+  m.$('#peWebFiles').addEventListener('change', async e => {
+    const files = [...e.target.files]; e.target.value = '';
+    for (const f of files) {
+      try { web.push(await uploadPhoto(f)); renderWeb(); m.$('#pe-stocklabel').checked = true; }
+      catch (err) { showAdminToast('⚠️ ' + (err.message || 'Upload failed')); }
+    }
+  });
+  // Pasted links are copied into your Drive so they keep working if the store changes its page
+  m.$('#peLinkAdd').addEventListener('click', async () => {
     const v = m.$('#peLink').value.trim();
     if (!/^https?:\/\//i.test(v)) return showAdminToast('⚠️ Paste a full link starting with https://');
-    web.push(v); m.$('#peLink').value = ''; renderWeb();
+    const btn = m.$('#peLinkAdd'); btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const r = await apiPost('admin_import_image', { url: v, name: m.$('#pe-model').value.trim() || m.$('#pe-name').value.trim() });
+      web.push(r.url);
+    } catch { web.push(v); } // the site blocked copying — use the link as-is
+    m.$('#peLink').value = ''; btn.disabled = false; btn.textContent = 'Add';
+    m.$('#pe-stocklabel').checked = true;
+    renderWeb();
   });
 
   m.$('#peSave').addEventListener('click', () => {
@@ -414,7 +450,7 @@ function openProductEditor(id) {
     syncStorefront();
     renderInventory();
     renderDashboard();
-    saveRemote('inventory', [record]);
+    saveRemote('inventory', [record], 'Edit product');
     m.close();
     showAdminToast(existing ? `✅ ${name} saved` : `✅ ${name} added`);
   });
@@ -585,7 +621,7 @@ function openRecordSale(id) {
     setStore('sales', [sale, ...getSales()]);
     syncStorefront();
     saveRemote('sales', [sale]);
-    saveRemote('inventory', [p]);
+    saveRemote('inventory', [p], 'Record sale');
     renderInventory(); renderSales(); renderDashboard();
     m.close();
     showAdminToast(`✅ Sale recorded — ${p.name}${p.stock <= 0 ? ' is now sold out on the website' : ''}`);
@@ -860,32 +896,40 @@ async function draftFollowupsNow(btn) {
   } finally { btn.disabled = false; btn.innerHTML = label; }
 }
 
-// ─── Website images: find them now for products that have none ───
-const imageJobs = new Set();
-async function findMissingWebImages(ids) {
+// ─── Background jobs: website images + price research, one product at a time ───
+const imageJobs = new Set(), priceJobs = new Set();
+let jobChain = Promise.resolve();
+function queueJob(fn) { jobChain = jobChain.then(fn, fn); return jobChain; }
+
+async function runProductJobs({ type, ids, set, missing, label, force }) {
   const inv = getStore('inventory');
-  const todo = (ids || inv.filter(p => (p.stock || 0) > 0 && !String(p.imageUrl || '').trim()).map(p => p.id))
-    .filter(id => !imageJobs.has(id));
-  if (!todo.length) return showAdminToast(ids ? 'Nothing to look for' : '✅ Every in-stock product already has a website image');
-  todo.forEach(id => imageJobs.add(id));
+  const todo = (ids || inv.filter(p => (p.stock || 0) > 0 && missing(p)).map(p => p.id)).filter(id => !set.has(id));
+  if (!todo.length) { if (!ids) showAdminToast(`✅ Nothing left to ${label}`); return; }
+  todo.forEach(id => set.add(id));
   renderInventory();
-  let found = 0;
-  for (const id of todo) {
-    try {
-      const { update } = await apiPost('admin_auto_images', { id, force: !ids });
-      const all = getStore('inventory');
-      const p = all.find(x => x.id === id);
-      if (p && update) { Object.assign(p, update); setStore('inventory', all); }
-      if (update && update.imageUrl) found++;
-    } catch (err) {
-      if (err.code === 'unauthorized') { handleApiError(err, 'Images'); break; }
-    } finally {
-      imageJobs.delete(id);
-      renderInventory();
+  return queueJob(async () => {
+    let done = 0;
+    for (const id of todo) {
+      try {
+        const { update } = await apiPost(type, { id, force });
+        const all = getStore('inventory'); const p = all.find(x => x.id === id);
+        if (p && update) { Object.assign(p, update); setStore('inventory', all); }
+        if (update && (update.imageUrl || update.priceResearch)) done++;
+      } catch (err) {
+        if (err.code === 'unauthorized') { handleApiError(err, label); break; }
+      } finally { set.delete(id); renderInventory(); }
     }
-  }
-  [...todo].forEach(id => imageJobs.delete(id));
-  syncStorefront(); renderInventory();
-  const missed = todo.length - found;
-  showAdminToast(`🖼 Website images: found ${found} of ${todo.length}${missed ? ' — hover “No web image” to see why' : ''}`);
+    todo.forEach(id => set.delete(id));
+    syncStorefront(); renderInventory();
+    showAdminToast(`${type === 'admin_auto_images' ? '🖼 Website images' : '💲 Price research'}: ${done} of ${todo.length} done${done < todo.length ? ' — hover the tag to see why' : ''}`);
+  });
+}
+
+function findMissingWebImages(ids) {
+  return runProductJobs({ type: 'admin_auto_images', ids, set: imageJobs, label: 'find images for', force: !ids,
+    missing: p => !String(p.imageUrl || '').trim() });
+}
+function researchMissingPrices(ids) {
+  return runProductJobs({ type: 'admin_auto_price', ids, set: priceJobs, label: 'research prices for',
+    missing: p => !p.priceResearch });
 }

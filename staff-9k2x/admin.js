@@ -94,10 +94,10 @@ function handleApiError(e, what) {
 }
 
 // Save / delete individual records — never rewrites data the customer submitted
-async function saveRemote(collection, records) {
+async function saveRemote(collection, records, reason = '') {
   if (!records.length) return;
   try {
-    await apiPost('admin_upsert', { collection, records });
+    await apiPost('admin_upsert', { collection, records, reason });
     setSheetsState('ok');
   } catch (e) { handleApiError(e, 'Save'); }
 }
@@ -317,7 +317,7 @@ function restock(sale, dir) {
   if (!changed.length) return;
   setStore('inventory', inv);
   syncStorefront();
-  saveRemote('inventory', changed);
+  saveRemote('inventory', changed, 'order status change');
   showAdminToast(dir > 0 ? '↩️ Items returned to stock' : '📦 Stock reduced again');
 }
 
@@ -409,7 +409,7 @@ function renderInventory() {
       </td>
       <td class="c-cond"><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>
       <td class="c-loc" style="color:var(--gray-dark)">${esc(p.storageLocation) || '—'}</td>
-      <td class="c-price" data-label="Price $"><input type="number" inputmode="decimal" id="price_${id}" value="${esc(p.price)}" min="0" class="mini-input" style="width:84px" />${p.priceResearch && p.priceResearch.low ? `<div class="inv-range" title="Researched ${esc(new Date(p.priceResearch.at).toLocaleDateString())}">Range $${p.priceResearch.low}–${p.priceResearch.high}</div>` : ''}</td>
+      <td class="c-price" data-label="Price $"><input type="number" inputmode="decimal" id="price_${id}" value="${esc(p.price)}" min="0" class="mini-input" style="width:84px" />${priceJobs.has(p.id) ? '<div class="inv-range busy">Researching price…</div>' : p.priceResearch && p.priceResearch.low ? `<div class="inv-range" title="Suggested $${p.priceResearch.suggested} · MSRP $${p.priceResearch.msrp || '—'} · researched ${esc(new Date(p.priceResearch.at).toLocaleDateString())}">Range $${p.priceResearch.low}–${p.priceResearch.high}</div>` : p.priceResearchNote ? `<div class="inv-range none" title="${esc(p.priceResearchNote)}">No price data</div>` : ''}</td>
       <td class="c-stock" data-label="Stock">
         <div class="stepper">
           <button onclick="adjustStock('${id}',-1)" aria-label="Less">${ic('minus')}</button>
@@ -473,7 +473,7 @@ function saveInventoryRow(productId) {
   setStore('inventory', saved);
   syncStorefront();
   renderInventory();
-  if (record) saveRemote('inventory', [record]);
+  if (record) saveRemote('inventory', [record], 'row Save button');
   showAdminToast(`✅ ${record ? record.name : 'Product'} updated`);
 }
 
@@ -516,7 +516,7 @@ function saveAllInventory() {
   setStore('inventory', saved);
   syncStorefront();
   renderInventory();
-  saveRemote('inventory', saved);
+  saveRemote('inventory', saved, 'Save All');
   showAdminToast('✅ All inventory saved!');
 }
 
