@@ -25,6 +25,17 @@ const CATEGORY_SINGULAR = { refrigerator: 'Refrigerator', washer: 'Washer', drye
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+// Pricing shown to customers is kept honest:
+// • a strikethrough "was" price only for a price we actually charged before (oldPrice)
+// • new retail (MSRP) is a plain reference line — a savings claim only for new / open-box items
+function wasPrice(p) { const was = Number(p.oldPrice) || 0; return was > (Number(p.price) || 0) ? was : 0; }
+function retailNote(p) {
+  const msrp = Number(p.msrp) || 0, price = Number(p.price) || 0;
+  if (!(msrp > price) || !price) return '';
+  return String(p.condition || '').toLowerCase().startsWith('new')
+    ? `Save ${money(msrp - price)} vs. new retail of ${money(msrp)}`
+    : `Comparable new retail: about ${money(msrp)}`;
+}
 function money(n, cents = false) {
   return '$' + (Number(n) || 0).toLocaleString('en-US', cents
     ? { minimumFractionDigits: 2, maximumFractionDigits: 2 }
@@ -57,27 +68,27 @@ async function apiGet(action, { timeout = 12000 } = {}) {
   } finally { clearTimeout(t); }
 }
 
-// Sends a customer request. Returns the server's JSON when readable.
-// If the response can't be read (network hiccup), retries once in no-cors mode —
-// the server de-duplicates on clientRef, so this can never create a double order.
+// Sends a customer request and returns the server's JSON.
+// If the reply can't be read (network hiccup, timeout), we never claim success: the request is
+// re-sent once so it gets through if it can (the server de-duplicates on clientRef), and the
+// customer is asked to call so nothing is lost.
 async function apiPost(type, payload) {
   const body = JSON.stringify({ type, ...payload });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45000);
   try {
     const res = await fetch(SHEETS_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body
+      body, signal: ctrl.signal
     });
     return await res.json();
   } catch (err) {
-    console.warn('Retrying request without reading the response', err);
-    try {
-      await fetch(SHEETS_WEBHOOK_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body });
-      return { success: true, unconfirmed: true };
-    } catch (err2) {
-      return { success: false, error: `We couldn't reach our system. Please check your connection or call us at ${BUSINESS_PHONE}.` };
-    }
-  }
+    console.warn('Could not read the reply — re-sending once', err);
+    try { await fetch(SHEETS_WEBHOOK_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body }); } catch {}
+    return { success: false, uncertain: true,
+      error: `We couldn't confirm this went through — your connection may have dropped. Please call us at ${BUSINESS_PHONE} so we can make sure we have it.` };
+  } finally { clearTimeout(timer); }
 }
 
 // ── Validation ──

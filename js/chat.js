@@ -42,7 +42,8 @@
         <div><strong>Oceanside Appliance</strong><span>Ask about appliances, delivery or repairs</span></div>
         <button type="button" class="chat-close" aria-label="Close chat">${icon('x')}</button>
       </header>
-      <div class="chat-log" aria-live="polite"></div>
+      <div class="chat-log"></div>
+      <p class="sr-only" aria-live="polite" id="chatLive"></p>
       <form class="chat-form" autocomplete="off">
         <input type="text" name="website" class="hp-field" tabindex="-1" aria-hidden="true" />
         <label class="sr-only" for="chatInput">Your message</label>
@@ -74,7 +75,10 @@
     els.launcher.hidden = open;
     els.launcher.setAttribute('aria-expanded', String(open));
     document.body.classList.toggle('chat-open', open);
-    if (open) { scrollDown(); if (focus && matchMedia('(min-width: 701px)').matches) els.input.focus(); }
+    const full = matchMedia('(max-width: 700px)').matches;
+    els.panel.setAttribute('aria-modal', String(open && full));
+    // Focus moves into the chat: the text box on a computer, the close button on a phone (no keyboard pop-up)
+    if (open) { scrollDown(); if (focus) (full ? els.panel.querySelector('.chat-close') : els.input).focus({ preventScroll: true }); }
     else if (focus) els.launcher.focus();
   }
 
@@ -136,11 +140,13 @@
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'failed');
       state.messages.push({ role: 'assistant', text: json.reply || '', products: json.products || [], action: json.action || 'none' });
+      const live = document.getElementById('chatLive'); if (live) live.textContent = json.reply || '';
     } catch (err) {
       console.warn('Chat failed', err);
       // Put the question back so the customer can retry; the history must stay question/answer pairs
       state.messages.pop();
       els.input.value = q;
+      const live = document.getElementById('chatLive'); if (live) live.textContent = 'Sorry, the chat could not connect.';
       errorNote = `Sorry — I couldn't connect just now. Try again, or call us at ${BUSINESS_PHONE}.`;
     }
     busy = false; els.send.disabled = false;

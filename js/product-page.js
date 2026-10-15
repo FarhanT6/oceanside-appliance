@@ -5,13 +5,13 @@
 // ============================================
 
 const BASE = (document.currentScript?.getAttribute('src') || '').replace(/js\/product-page\.js.*$/, '');
-let ALL = [];
+let ALL = [], loaded = false;
 
 function isNewCond(p) { return String(p.condition || '').toLowerCase().startsWith('new'); }
 function normalize(p) {
   return { ...p, id: String(p.id || ''), name: String(p.name || 'Appliance'), brand: String(p.brand || ''),
     category: String(p.category || 'other').toLowerCase(), price: Number(p.price) || 0,
-    msrp: Number(p.msrp) || 0, refPrice: Number(p.refPrice) || 0, stock: Math.max(0, parseInt(p.stock, 10) || 0) };
+    msrp: Number(p.msrp) || 0, refPrice: Number(p.refPrice) || 0, oldPrice: Number(p.oldPrice) || 0, stock: Math.max(0, parseInt(p.stock, 10) || 0) };
 }
 function pageLink(p) { return `${BASE}product.html?id=${encodeURIComponent(p.id)}`; }
 
@@ -24,7 +24,7 @@ async function loadAll() {
     const data = await apiGet('products');
     if (!Array.isArray(data?.products)) throw new Error('bad response');
     try { localStorage.setItem('oa_products_cache', JSON.stringify({ at: Date.now(), products: data.products })); } catch {}
-    ALL = data.products.map(normalize);
+    ALL = data.products.map(normalize); loaded = true;
     render();
   } catch (err) {
     console.warn('Could not load inventory', err);
@@ -40,7 +40,7 @@ function render(failed = false) {
 // ── Cards ──
 function cardHtml(p) {
   const img = productImages(p)[0];
-  const compare = Math.max(p.msrp, p.refPrice);
+  const compare = wasPrice(p);
   return `<a class="product-card" href="${pageLink(p)}">
     <div class="product-media">
       ${img ? `<img src="${esc(img)}" alt="${esc(p.name)}" loading="lazy" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}
@@ -81,7 +81,7 @@ function setMeta(p) {
   document.querySelector('meta[property="og:description"]')?.setAttribute('content', desc);
   if (imgs[0]) document.querySelector('meta[property="og:image"]')?.setAttribute('content', imgs[0]);
   const canon = document.createElement('link');
-  canon.rel = 'canonical'; canon.href = location.href.split('#')[0];
+  canon.rel = 'canonical'; canon.href = location.origin + location.pathname + '?id=' + encodeURIComponent(p.id);
   document.head.appendChild(canon);
   const ld = document.createElement('script');
   ld.type = 'application/ld+json';
@@ -107,7 +107,7 @@ function renderProduct(failed) {
   const id = new URLSearchParams(location.search).get('id');
   const p = ALL.find(x => x.id === id);
   if (!p) {
-    if (!ALL.length && !failed) return; // still loading
+    if (!loaded && !ALL.length && !failed) return; // still loading
     document.getElementById('crumbName').textContent = 'Not found';
     wrap.innerHTML = `<div class="grid-message">${icon('search')}<h3>${failed ? "We couldn't load this listing" : 'This appliance is no longer listed'}</h3>
       <p>${failed ? 'Please check your connection and try again.' : 'It may have sold. Take a look at what’s in stock now, or give us a call.'}</p>
@@ -118,7 +118,8 @@ function renderProduct(failed) {
   document.getElementById('crumbName').textContent = p.name;
   const imgs = productImages(p);
   const out = p.stock <= 0;
-  const compare = Math.max(p.msrp, p.refPrice);
+  const compare = wasPrice(p);
+  const note = retailNote(p);
   const specs = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {});
   if (p.model) specs.unshift(['Model', p.model]);
   if (p.condition) specs.unshift(['Condition', p.condition]);
@@ -136,7 +137,7 @@ function renderProduct(failed) {
       <div class="pm-meta">${esc([p.brand, CATEGORY_SINGULAR[p.category]].filter(Boolean).join(' · '))}</div>
       <h1 class="pp-title">${esc(p.name)}</h1>
       <div class="modal-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
-      ${p.msrp > p.price ? `<div class="product-savings">${icon('check')} Save ${money(p.msrp - p.price)} off MSRP</div>` : ''}
+      ${note ? `<div class="product-savings${isNewCond(p) ? '' : ' plain'}">${isNewCond(p) ? icon('check') + ' ' : ''}${note}</div>` : ''}
       <div class="stock-bar"><span class="stock-dot${out ? ' out' : p.stock <= 2 ? ' low' : ''}"></span><span>${out ? 'This one has sold' : p.stock <= 2 ? `Only ${p.stock} left` : 'In stock and ready'}</span></div>
       ${p.desc ? `<p class="modal-desc">${esc(p.desc)}</p>` : ''}
       ${specs.length ? `<div class="modal-specs">${specs.map(([k, v]) => `<div class="spec-item"><strong>${esc(k)}</strong>${esc(v)}</div>`).join('')}</div>` : ''}

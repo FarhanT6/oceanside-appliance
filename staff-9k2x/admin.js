@@ -36,6 +36,12 @@ function matches(record, q, fields) {
     return v.includes(q) || (digitsQ.length >= 3 && v.replace(/\D/g, '').includes(digitsQ));
   });
 }
+// Give each cell its column name, so tables can turn into cards on a phone
+function labelCells(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  const heads = [...(tbody?.closest('table')?.querySelectorAll('thead th') || [])].map(th => th.textContent.trim());
+  tbody?.querySelectorAll('tr').forEach(tr => [...tr.children].forEach((td, i) => { if (heads[i] && td.colSpan === 1) td.dataset.label = heads[i]; }));
+}
 function searchValue(id) { return (document.getElementById(id)?.value || '').trim(); }
 
 // Keep the storefront's cached copy in sync when this browser also browses the shop
@@ -94,15 +100,27 @@ function handleApiError(e, what) {
 }
 
 // Save / delete individual records — never rewrites data the customer submitted
+// Every save bumps this, so a refresh that started earlier can't overwrite newer local changes
+let writeSeq = 0;
+
+// Saves records (send only the fields that changed). Returns true when saved.
 async function saveRemote(collection, records, reason = '') {
-  if (!records.length) return;
+  if (!records.length) return true;
+  writeSeq++;
   try {
-    await apiPost('admin_upsert', { collection, records, reason });
+    const res = await apiPost('admin_upsert', { collection, records, reason });
     setSheetsState('ok');
-  } catch (e) { handleApiError(e, 'Save'); }
+    if (res.conflicts && res.conflicts.length) {
+      // Stock changed somewhere else (a website order, another device) since this screen loaded
+      showAdminToast(`⚠️ Stock for ${res.conflicts.map(c => `${c.name} is now ${c.stock}`).join(', ')} — it changed elsewhere, so your stock edit wasn't saved. Refreshed.`);
+      pullFromSheets({ silent: true, force: true });
+    }
+    return true;
+  } catch (e) { handleApiError(e, 'Save'); return false; }
 }
 async function deleteRemote(collection, ids) {
   if (!ids.length) return;
+  writeSeq++;
   try {
     await apiPost('admin_delete', { collection, ids });
     setSheetsState('ok');
@@ -110,14 +128,16 @@ async function deleteRemote(collection, ids) {
 }
 
 // Pull everything from Sheets and replace the local copy
-let pulling = false;
-async function pullFromSheets({ silent = false } = {}) {
-  if (pulling) return;
+let pulling = false, pullAgain = false;
+async function pullFromSheets({ silent = false, force = false } = {}) {
+  if (pulling) { if (force) pullAgain = true; return; }
   pulling = true;
+  const seqAtStart = writeSeq;
   const btn = document.getElementById('syncBtn');
   if (btn && !silent) { btn.textContent = '⏳ Refreshing…'; btn.disabled = true; }
   try {
     const { data } = await apiPost('admin_pull');
+    if (writeSeq !== seqAtStart) { pullAgain = true; return; } // a save happened meanwhile — this data is already stale
 
     // One-time move of data that only ever lived in this browser up to Sheets
     if (!localStorage.getItem('oa_migrated_v2')) {
@@ -139,7 +159,7 @@ async function pullFromSheets({ silent = false } = {}) {
     syncStorefront();
     setSheetsState('ok');
     const active = document.querySelector('.sidebar-link.active')?.dataset.tab || 'dashboard';
-    renderTab(active);
+    if (active === 'inventory') renderInventorySafely(); else renderTab(active);
     if (active !== 'dashboard') renderDashboard();
     if (!silent) showAdminToast('✅ Up to date with Google Sheets');
   } catch (e) {
@@ -147,6 +167,7 @@ async function pullFromSheets({ silent = false } = {}) {
   } finally {
     pulling = false;
     if (btn) { btn.textContent = '🔄 Refresh'; btn.disabled = false; }
+    if (pullAgain) { pullAgain = false; setTimeout(() => pullFromSheets({ silent: true }), 1500); }
   }
 }
 
@@ -178,7 +199,7 @@ function renderDashboard() {
   const repairs = getRepairs();
   const inv     = getInventory();
 
-  const revenue = sales.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (o.total || 0), 0);
+  const revenue = sales.filter(o => o.status === 'completed').reduce((s, o) => s + (o.total || 0), 0);
   document.getElementById('kpi-revenue').textContent  = '$' + revenue.toLocaleString('en-US', { maximumFractionDigits: 0 });
   document.getElementById('kpi-orders').textContent   = sales.filter(o => o.status === 'pending').length;
   document.getElementById('kpi-repairs').textContent  = repairs.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled').length;
@@ -234,7 +255,17 @@ function renderViewRequests() {
     <td style="font-size:.8rem">${esc(r.email)||'—'}</td>
     <td style="font-size:.82rem">${esc(r.appliance)||'—'}${r.brand?' · '+esc(r.brand):''}</td>
     <td style="font-size:.78rem;color:var(--gray-mid)">${esc(r.preferredTime)||'—'}</td>
-  </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No viewing requests yet.</td></tr>';
+    <td><select class="status-select" onchange="updateViewStatus('${esc(r.requestId)}', this.value)">${['New', 'Contacted', 'Done'].map(st => `<option ${(r.status || 'New') === st ? 'selected' : ''}>${st}</option>`).join('')}</select></td>
+  </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No viewing requests yet.</td></tr>';
+}
+
+function updateViewStatus(requestId, status) {
+  const all = getViewRequests();
+  const v = all.find(x => x.requestId === requestId);
+  if (!v) return;
+  v.status = status;
+  setStore('view_requests', all);
+  saveRemote('views', [{ requestId, status }], 'viewing request status');
 }
 
 function clearViewRequests() {
@@ -290,6 +321,7 @@ function renderSales() {
              : '<tr><td colspan="7" class="empty-row">No orders yet.<br><small>Website orders appear here automatically. Use “Record Sale” for in-store or marketplace sales.</small></td></tr>';
   }
   document.getElementById('salesTbody').innerHTML = html;
+  labelCells('salesTbody');
 }
 
 function updateSaleStatus(orderId, status) {
@@ -300,7 +332,7 @@ function updateSaleStatus(orderId, status) {
   sale.status = status;
   setStore('sales', sales);
   renderSales();
-  saveRemote('sales', [sale]);
+  saveRemote('sales', [{ orderId, status }], 'order status');
   // Cancelling an order puts its items back in stock
   if (status === 'cancelled' && prev !== 'cancelled') restock(sale, +1);
   if (prev === 'cancelled' && status !== 'cancelled') restock(sale, -1);
@@ -312,7 +344,10 @@ function restock(sale, dir) {
   const changed = [];
   sale.lineItems.forEach(l => {
     const p = inv.find(i => i.id === l.id);
-    if (p) { p.stock = Math.max(0, (p.stock || 0) + dir * (l.qty || 0)); changed.push(p); }
+    if (!p) return;
+    const before = p.stock || 0;
+    p.stock = Math.max(0, before + dir * (l.qty || 0));
+    changed.push({ id: p.id, stock: p.stock, _expectStock: before });
   });
   if (!changed.length) return;
   setStore('inventory', inv);
@@ -329,8 +364,6 @@ function deleteSale(orderId) {
 }
 
 // ─── REPAIRS ───
-function openDescModal(ticketId) { openRepairDetail(ticketId); }
-
 function renderRepairs() {
   const q = searchValue('repairsSearch');
   const all = getRepairs()
@@ -347,7 +380,7 @@ function renderRepairs() {
       <td>${esc(r.firstName)} ${esc(r.lastName)}<br><small style="color:var(--gray-mid)">${esc(r.address)}</small></td>
       <td><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></td>
       <td style="text-transform:capitalize">${esc(r.applianceType)}${r.brand ? `<br><small style="color:var(--gray-mid)">${esc(r.brand)}</small>` : ''}${r.requestType && r.requestType !== 'Repair' ? `<br>${typeTag(r.requestType)}` : ''}</td>
-      <td class="wrap" style="color:var(--gray-dark)">${r.aiTriage && typeof urgencyTag === 'function' ? urgencyTag(r.aiTriage.urgency) + ' ' : ''}${esc(desc.substring(0, 70))}${desc.length > 70 ? '…' : ''}</td>
+      <td class="wrap" style="color:var(--gray-dark)">${r.aiTriage ? urgencyTag(r.aiTriage.urgency) + ' ' : ''}${esc(desc.substring(0, 70))}${desc.length > 70 ? '…' : ''}</td>
       <td>${r.scheduledFor ? formatDate(r.scheduledFor) : '<span style="color:var(--gray-mid)">—</span>'}</td>
       <td>
         <select onchange="updateRepairStatus('${id}', this.value)" class="status-select">
@@ -369,6 +402,7 @@ function renderRepairs() {
   if (done.length)   html += sectionHeader('Completed / cancelled', done.length, '#7f8c8d') + done.map(r => repairRow(r, true)).join('');
   if (!all.length) html = `<tr><td colspan="8" class="empty-row">${q ? 'No repair requests match your search.' : 'No repair requests yet.'}</td></tr>`;
   document.getElementById('repairsTbody').innerHTML = html;
+  labelCells('repairsTbody');
 }
 
 function updateRepairStatus(ticketId, status) {
@@ -379,7 +413,7 @@ function updateRepairStatus(ticketId, status) {
   r.status = status;
   setStore('repairs', repairs);
   renderRepairs();
-  saveRemote('repairs', [r]);
+  saveRemote('repairs', [{ ticketId, status }], 'repair status');
   if (status === 'Completed' && prev !== 'Completed') openRepairDetail(ticketId, { askPayment: true });
 }
 
@@ -395,7 +429,7 @@ function renderInventory() {
   const q = searchValue('inventorySearch');
   const all      = getInventory().filter(p => matches(p, q, ['id', 'name', 'brand', 'model', 'category', 'condition', 'storageLocation']));
   const inStock  = all.filter(p => p.stock > 0).sort((a,b) => String(a.name).localeCompare(String(b.name)));
-  const outStock = all.filter(p => p.stock <= 0);
+  const outStock = all.filter(p => !(p.stock > 0));
 
   function row(p) {
     const id = esc(p.id);
@@ -409,11 +443,11 @@ function renderInventory() {
       </td>
       <td class="c-cond"><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>
       <td class="c-loc" style="color:var(--gray-dark)">${esc(p.storageLocation) || '—'}</td>
-      <td class="c-price" data-label="Price $"><input type="number" inputmode="decimal" id="price_${id}" value="${esc(p.price)}" min="0" class="mini-input" style="width:84px" />${priceJobs.has(p.id) ? '<div class="inv-range busy">Researching price…</div>' : p.priceResearch && p.priceResearch.low ? `<div class="inv-range" title="Suggested $${p.priceResearch.suggested} · MSRP $${p.priceResearch.msrp || '—'} · researched ${esc(new Date(p.priceResearch.at).toLocaleDateString())}">Range $${p.priceResearch.low}–${p.priceResearch.high}</div>` : p.priceResearchNote ? `<div class="inv-range none" title="${esc(p.priceResearchNote)}">No price data</div>` : ''}</td>
+      <td class="c-price" data-label="Price $"><input type="number" inputmode="decimal" id="price_${id}" value="${esc(p.price)}" data-orig="${esc(p.price)}" min="0" class="mini-input inv-edit" style="width:84px" />${priceJobs.has(p.id) ? '<div class="inv-range busy">Researching price…</div>' : p.priceResearch && p.priceResearch.low ? `<div class="inv-range" title="Suggested $${p.priceResearch.suggested} · MSRP $${p.priceResearch.msrp || '—'} · researched ${esc(new Date(p.priceResearch.at).toLocaleDateString())}">Range $${p.priceResearch.low}–${p.priceResearch.high}</div>` : p.priceResearchNote ? `<div class="inv-range none" title="${esc(p.priceResearchNote)}">No price data</div>` : ''}</td>
       <td class="c-stock" data-label="Stock">
         <div class="stepper">
           <button onclick="adjustStock('${id}',-1)" aria-label="Less">${ic('minus')}</button>
-          <input type="number" inputmode="numeric" id="stock_${id}" value="${esc(p.stock)}" min="0" class="mini-input" />
+          <input type="number" inputmode="numeric" id="stock_${id}" value="${esc(p.stock)}" data-orig="${esc(p.stock)}" min="0" class="mini-input inv-edit" />
           <button onclick="adjustStock('${id}',1)" aria-label="More">${ic('plus')}</button>
         </div>
       </td>
@@ -442,83 +476,53 @@ function adjustStock(productId, delta) {
   input.value = Math.max(0, (parseInt(input.value) || 0) + delta);
 }
 
-function saveStock(productId) { saveInventoryRow(productId); }
-
-function saveInventoryRow(productId) {
-  const stockInput = document.getElementById('stock_' + productId);
-  const priceInput = document.getElementById('price_' + productId);
-  const newQty   = parseInt(stockInput.value);
-  const newPrice = parseFloat(priceInput.value);
-  if (isNaN(newQty) || newQty < 0) return;
-  // Work on raw saved store to preserve _custom flag
-  const saved = getStore('inventory');
-  const existing = saved.find(s => s.id === productId);
-  if (existing) {
-    existing.stock = newQty;
-    existing.price = isNaN(newPrice) ? existing.price : newPrice;
-    existing.stockStatus = newQty <= 0 ? 'out' : 'in-stock';
-  } else {
-    // Base product being saved for first time
-    const item = getInventory().find(i => i.id === productId);
-    if (!item) return;
-    saved.push({ id: item.id, name: item.name, brand: item.brand,
-      category: item.category, price: isNaN(newPrice) ? item.price : newPrice,
-      stock: newQty, stockStatus: newQty <= 0 ? 'out' : 'in-stock' });
-  }
-  const record = saved.find(s => s.id === productId);
-  const locEl  = document.getElementById('loc_' + productId);
-  const condEl = document.getElementById('cond_' + productId);
-  if (record && locEl)  record.storageLocation = locEl.value.trim();
-  if (record && condEl) record.condition = condEl.value;
-  setStore('inventory', saved);
-  syncStorefront();
-  renderInventory();
-  if (record) saveRemote('inventory', [record], 'row Save button');
-  showAdminToast(`✅ ${record ? record.name : 'Product'} updated`);
-}
-
-function saveAllInventory() {
-  // Work from the raw saved store so we never strip _custom or other fields
-  const saved = getStore('inventory');
-  const allItems = getInventory(); // merged view for reading current input values
-
-  allItems.forEach(item => {
-    const si = document.getElementById('stock_' + item.id);
-    const pi = document.getElementById('price_' + item.id);
-    const newStock = si ? Math.max(0, parseInt(si.value) || 0) : item.stock;
-    const newPrice = pi ? (parseFloat(pi.value) || item.price) : item.price;
-    const newStatus = newStock <= 0 ? 'out' : 'in-stock';
-
-    const existing = saved.find(s => s.id === item.id);
-    if (existing) {
-      // Update in place — preserves _custom and all other fields
-      existing.stock = newStock;
-      existing.price = newPrice;
-      existing.stockStatus = newStatus;
-      const locEl = document.getElementById('loc_' + item.id);
-      if (locEl !== null) existing.storageLocation = locEl.value.trim();
-      const condEl  = document.getElementById('cond_' + item.id);
-      if (condEl !== null) existing.condition = condEl.value;
-      const msrpEl  = document.getElementById('msrp_' + item.id);
-      if (msrpEl !== null) existing.msrp = parseFloat(msrpEl.value) || 0;
-      const refEl   = document.getElementById('ref_' + item.id);
-      if (refEl !== null) existing.refPrice = parseFloat(refEl.value) || 0;
-      const imgEl   = document.getElementById('img_' + item.id);
-      if (imgEl !== null) existing.imageUrl = imgEl.value.trim();
-    } else {
-      // First time saving this product (base product with changes)
-      saved.push({ id: item.id, name: item.name, brand: item.brand,
-        category: item.category, price: newPrice,
-        stock: newStock, stockStatus: newStatus });
+// Unsaved edits in the Inventory table: { id, price?, stock?, expectStock } for rows that changed
+function inventoryEdits(onlyId) {
+  const edits = [];
+  document.querySelectorAll('#inventoryTbody tr').forEach(tr => {
+    const pi = tr.querySelector('[id^="price_"]'), si = tr.querySelector('[id^="stock_"]');
+    if (!pi || !si) return;
+    const id = pi.id.slice(6);
+    if (onlyId && id !== onlyId) return;
+    const e = { id };
+    if (pi.value.trim() !== '' && pi.value !== pi.dataset.orig && !isNaN(parseFloat(pi.value))) e.price = Math.max(0, parseFloat(pi.value));
+    if (si.value.trim() !== '' && si.value !== si.dataset.orig && !isNaN(parseInt(si.value))) {
+      e.stock = Math.max(0, parseInt(si.value)); e._expectStock = Number(si.dataset.orig) || 0;
     }
+    if (e.price !== undefined || e.stock !== undefined) edits.push(e);
   });
+  return edits;
+}
+function inventoryHasUnsaved() {
+  const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#inventoryTbody');
+  return !!focused || inventoryEdits().length > 0;
+}
+// Re-draw the Inventory table unless it would throw away something being typed
+let inventoryRenderPending = false;
+function renderInventorySafely() {
+  if (inventoryHasUnsaved()) { inventoryRenderPending = true; return; }
+  inventoryRenderPending = false;
+  renderInventory();
+}
+document.addEventListener('focusout', () => setTimeout(() => { if (inventoryRenderPending) renderInventorySafely(); }, 200));
 
+function applyInventoryEdits(edits, reason) {
+  if (!edits.length) return showAdminToast('Nothing changed');
+  const saved = getStore('inventory');
+  edits.forEach(e => {
+    const p = saved.find(x => x.id === e.id);
+    if (!p) return;
+    if (e.price !== undefined) p.price = e.price;
+    if (e.stock !== undefined) p.stock = e.stock;
+  });
   setStore('inventory', saved);
   syncStorefront();
   renderInventory();
-  saveRemote('inventory', saved, 'Save All');
-  showAdminToast('✅ All inventory saved!');
+  saveRemote('inventory', edits, reason);
+  showAdminToast(edits.length === 1 ? `✅ ${saved.find(x => x.id === edits[0].id)?.name || 'Product'} updated` : `✅ Saved ${edits.length} products`);
 }
+function saveInventoryRow(productId) { applyInventoryEdits(inventoryEdits(productId), 'row Save button'); }
+function saveAllInventory() { applyInventoryEdits(inventoryEdits(), 'Save All'); }
 
 function removeProduct(productId) {
   const inv  = getInventory();
@@ -530,8 +534,6 @@ function removeProduct(productId) {
   deleteRemote('inventory', [productId]);
   showAdminToast(`🗑️ ${item.name} removed`);
 }
-
-function showAddProduct() { openProductEditor(); }
 
 // ─── GOOGLE SHEETS SETTINGS ───
 function setSheetsState(state) {
@@ -562,15 +564,6 @@ async function saveSheetUrl() {
   await pullFromSheets();
 }
 
-// The old "sync" buttons now simply refresh from Sheets
-function syncAllToSheets()      { return pullFromSheets(); }
-function syncToSheets()         { return pullFromSheets(); }
-function syncSalesToSheets()    { return pullFromSheets(); }
-function syncRepairsToSheets()  { return pullFromSheets(); }
-function syncInventoryToSheets(){ return pullFromSheets(); }
-
-// ─── EXPORT CSV ───
-
 // ─── LEDGER ───
 function filterByDate(items, period) {
   const now = new Date();
@@ -585,10 +578,8 @@ function filterByDate(items, period) {
 }
 
 // ─── REPAIR REVENUE ───
-function getRepairRevenue() {
-  try { return JSON.parse(localStorage.getItem('oa_repair_revenue') || '[]'); } catch(e) { return []; }
-}
-function setRepairRevenue(arr) { localStorage.setItem('oa_repair_revenue', JSON.stringify(arr)); }
+function getRepairRevenue() { return getStore('repair_revenue'); }
+function setRepairRevenue(arr) { setStore('repair_revenue', arr); }
 
 function showAddRepairRevenueModal() {
   const today = new Date().toISOString().slice(0,10);
@@ -675,7 +666,7 @@ function renderLedger() {
   const sales      = filterByDate(getSales(), period).sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
   const repairRevs = filterByDate(getRepairRevenue().map(r => ({...r, timestamp: r.timestamp||r.date+'T00:00:00'})), period)
                        .sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
-  const salesRev  = sales.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (o.total||0), 0);
+  const salesRev  = sales.filter(o => o.status === 'completed').reduce((s, o) => s + (o.total||0), 0);
   const repairRev = repairRevs.reduce((s, r) => s + (r.amount||0), 0);
   document.getElementById('ledger-revenue').textContent    = '$' + salesRev.toLocaleString('en-US',{minimumFractionDigits:2});
   document.getElementById('ledger-repair-rev').textContent = '$' + repairRev.toLocaleString('en-US',{minimumFractionDigits:2});
@@ -701,8 +692,8 @@ function renderLedger() {
     <td style="font-size:.82rem">${esc(r.customer||'—')}</td>
     <td><strong>$${(r.amount||0).toFixed(2)}</strong></td>
     <td style="font-size:.78rem;color:var(--gray-mid)">${esc(r.notes||'—')}</td>
-    <td><button onclick="generateRepairInvoice('${r.id}')" style="padding:.3rem .6rem;background:var(--ocean);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.72rem;font-family:var(--font-body)">🧾 Invoice</button></td>
-    <td><button onclick="deleteRepairRevenue('${r.id}')" style="background:none;border:none;cursor:pointer;color:var(--gray-mid);font-size:.9rem">🗑️</button></td>
+    <td><button onclick="generateRepairInvoice('${esc(r.id)}')" style="padding:.3rem .6rem;background:var(--ocean);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.72rem;font-family:var(--font-body)">🧾 Invoice</button></td>
+    <td><button onclick="deleteRepairRevenue('${esc(r.id)}')" style="background:none;border:none;cursor:pointer;color:var(--gray-mid);font-size:.9rem">🗑️</button></td>
   </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--gray-mid);padding:2rem">No repair revenue yet.<br><small>Click "+ Add Repair Revenue" to log a completed service.</small></td></tr>';
 }
 
@@ -712,8 +703,8 @@ function exportLedgerCSV() {
   const rows   = [['Date','Order ID','Customer','Email','Items','Subtotal','Tax','Delivery','Total','Type','Status']];
   sales.forEach(s => {
     const sub = Math.max(0,(s.total||0)-(s.tax||0)-(s.deliveryFee||0));
-    rows.push([formatDate(s.timestamp), s.orderId, `${esc(s.firstName||'')} ${esc(s.lastName||'')}`, s.email||'',
-      `"${esc(s.items||'')}"`, sub.toFixed(2), (s.tax||0).toFixed(2), (s.deliveryFee||0).toFixed(2),
+    rows.push([formatDate(s.timestamp), s.orderId, `${s.firstName||''} ${s.lastName||''}`.trim(), s.email||'',
+      s.items||'', sub.toFixed(2), (s.tax||0).toFixed(2), (s.deliveryFee||0).toFixed(2),
       (s.total||0).toFixed(2), s.fulfillment||'pickup', s.status||'pending']);
   });
   const csv = rows.map(r => r.map(csvCell).join(',')).join('\n');
@@ -857,10 +848,12 @@ document.addEventListener('DOMContentLoaded', () => {
     pullFromSheets({ silent: true });
   }
 
-  // Pick up new customer orders/requests while the panel is open
-  // (skipped on the Inventory tab so it never overwrites unsaved edits)
+  // Stay up to date while the panel is open (unsaved inventory edits are never overwritten —
+  // see renderInventorySafely). Also refresh as soon as you come back to the tab.
   setInterval(() => {
-    const active = document.querySelector('.sidebar-link.active')?.dataset.tab;
-    if (document.visibilityState === 'visible' && active !== 'inventory' && getAdminKey()) pullFromSheets({ silent: true });
+    if (document.visibilityState === 'visible' && getAdminKey() && !document.querySelector('.am-overlay')) pullFromSheets({ silent: true });
   }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && getAdminKey()) pullFromSheets({ silent: true });
+  });
 });

@@ -215,6 +215,7 @@ function openBulkImport() {
       if (!g.keep || !prev.keep) continue;
       const a = norm(g.f.model), b = norm(prev.f.model);
       if (a.length < 5 || a !== b) continue;
+      if (g.labels.length && prev.labels.length) { g.sameAsAbove = true; continue; } // each has its own label shot: likely two units
       prev.idx = [...prev.idx, ...g.idx].sort((x, y) => x - y);
       prev.labels = [...prev.labels, ...g.labels];
       prev.mergedNote = true;
@@ -231,7 +232,7 @@ function openBulkImport() {
   async function researchPrice(g) {
     if (!g.keep) return;
     if (!g.f.model && !g.f.name) return;
-    g.pricing = 'busy'; renderCard(g);
+    g.pricing = 'busy'; renderCard(g); updateFooter();
     try {
       const { pricing: r } = await apiPost('admin_ai_price', { product: { ...g.f } });
       if (r.suggestedPrice && !g.edited.has('price')) g.f.price = Math.round(r.suggestedPrice);
@@ -239,14 +240,14 @@ function openBulkImport() {
       if (r.suggestedPrice || r.rangeLow) g.f.priceResearch = priceResearchFrom(r);
       g.pricing = r.suggestedPrice || r.rangeLow ? 'done' : 'none';
     } catch (err) { g.pricing = 'error'; g.priceErr = err.message; }
-    renderCard(g);
+    renderCard(g); updateFooter();
   }
   async function readDetails(g) {
     if (!g.keep) return;
     const order = [...g.labels, ...g.idx.filter(i => !g.labels.includes(i))];
     const urls = order.map(i => S.items[i].url).filter(Boolean).slice(0, 4);
     if (!urls.length) { g.ai = 'error'; return renderCard(g); }
-    g.ai = 'reading'; renderCard(g);
+    g.ai = 'reading'; renderCard(g); updateFooter();
     try {
       const { suggestion: s } = await apiPost('admin_ai_product', { images: urls, hints: { brand: g.f.brand, category: g.f.category } });
       const set = (k, val) => { if (val && !g.edited.has(k)) g.f[k] = val; };
@@ -256,7 +257,7 @@ function openBulkImport() {
       g.check = s.checkBeforeSaving || '';
       g.ai = 'done';
     } catch (err) { g.ai = 'error'; g.err = err.message; }
-    renderCard(g);
+    renderCard(g); updateFooter();
   }
 
   // ── Step 4: review ──
@@ -317,6 +318,7 @@ function openBulkImport() {
         <label class="af bi-loc"><span class="af-label">Location <span class="hint">staff only</span></span><input data-f="storageLocation" value="${esc(g.f.storageLocation)}" placeholder="e.g. Ramona" /></label>
         <label class="af bi-desc"><span class="af-label">Description</span><textarea data-f="desc" rows="2">${esc(g.f.desc)}</textarea></label>
       </div>
+      ${g.sameAsAbove ? `<div class="ai-note">${ic('sparkles')}<span>Same model number as the appliance above. If it's the same unit, tap “Merge with above”; if you have two, keep both (or set Stock to 2 above and remove this one).</span></div>` : ''}
       ${g.mergedNote ? `<div class="ai-note">${ic('sparkles')}<span>Joined two photo groups with the same model number. If these are two separate units, use ✂ to split them.</span></div>` : ''}
       ${g.f.priceResearch ? priceRangeBox(g.f.priceResearch)
         : g.pricing === 'busy' ? `<div class="range-box empty"><span><span class="mini-spin"></span> Researching price online…</span></div>`
@@ -387,7 +389,9 @@ function openBulkImport() {
       return;
     }
     if (act === 'merge') {
-      const above = S.groups[n - 1];
+      let k = n - 1; while (k > 0 && !S.groups[k].keep) k--;
+      const above = S.groups[k];
+      if (!above.keep) above.keep = true;
       above.idx = [...above.idx, ...g.idx].sort((a, b) => a - b);
       above.labels = [...above.labels, ...g.labels];
       S.groups.splice(n, 1);
@@ -402,11 +406,15 @@ function openBulkImport() {
     const kept = S.groups.filter(g => g.keep);
     const busy = S.uploading > 0;
     m.$('#biDrafts').hidden = m.$('#biPublish').hidden = false;
-    m.$('#biDrafts').disabled = m.$('#biPublish').disabled = busy || !kept.length;
-    status(busy ? `Uploading photos… ${S.items.length - S.uploading}/${S.items.length}` : `${kept.length} appliance${kept.length === 1 ? '' : 's'} ready`);
+    const working = kept.filter(g => g.ai === 'waiting' || g.ai === 'reading' || g.pricing === 'busy').length;
+    m.$('#biDrafts').disabled = m.$('#biPublish').disabled = busy || working > 0 || !kept.length || S.saving;
+    status(busy ? `Uploading photos… ${S.items.length - S.uploading}/${S.items.length}`
+      : working ? `Reading labels and prices… ${kept.length - working}/${kept.length} done`
+      : `${kept.length} appliance${kept.length === 1 ? '' : 's'} ready`);
   }
 
-  function save(publish) {
+  async function save(publish) {
+    if (S.saving) return;
     const kept = S.groups.filter(g => g.keep);
     const missing = kept.findIndex(g => !(g.f.name || g.looksLike) || !g.f.category);
     if (missing >= 0) {
@@ -419,7 +427,7 @@ function openBulkImport() {
       const price = parseFloat(g.f.price) || 0;
       const urls = g.idx.map(i => S.items[i].url).filter(Boolean);
       return {
-        id: `PROD-${stamp + k}`, createdAt: new Date().toISOString(), _custom: true,
+        id: `PROD-${stamp + k}`, createdAt: new Date().toISOString(),
         name: g.f.name || g.looksLike, brand: g.f.brand, model: g.f.model, category: g.f.category,
         condition: g.f.condition, price, msrp: parseFloat(g.f.msrp) || 0, refPrice: 0,
         stock: Math.max(1, parseInt(g.f.stock, 10) || 1), desc: g.f.desc, specs: g.f.specs || {},
@@ -428,10 +436,12 @@ function openBulkImport() {
         draft: !(publish && price > 0),
       };
     });
-    const inv = getStore('inventory');
-    setStore('inventory', [...inv, ...records]);
+    S.saving = true; updateFooter(); status('Saving…');
+    const ok = await saveRemote('inventory', records, 'Bulk add');
+    S.saving = false;
+    if (!ok) { updateFooter(); status('Not saved — check your connection and try again'); return; }
+    setStore('inventory', [...getStore('inventory'), ...records]);
     syncStorefront();
-    saveRemote('inventory', records, 'Bulk add');
     renderInventory(); renderDashboard();
     const live = records.filter(r => !r.draft).length, drafts = records.length - live;
     m.close();

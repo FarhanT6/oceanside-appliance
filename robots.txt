@@ -1,5 +1,4 @@
 User-agent: *
 Allow: /
-Disallow: /staff-9k2x/
 
 Sitemap: https://farhant6.github.io/oceanside-appliance/sitemap.xml
