@@ -80,7 +80,9 @@ function chunkByGaps(items, max = 24) {
 
 // ─── The importer ───
 function openBulkImport() {
-  const S = { items: [], groups: [], uploading: 0, phase: 'pick' };
+  let lastLoc = '';
+  try { lastLoc = localStorage.getItem('oa_last_location') || ''; } catch {}
+  const S = { items: [], groups: [], uploading: 0, phase: 'pick', location: lastLoc };
 
   const m = openAdminModal({
     title: 'Bulk add from photos',
@@ -166,7 +168,7 @@ function openBulkImport() {
     return {
       key: Math.random().toString(36).slice(2), idx, labels, keep: true,
       confidence: g.confidence || 'low', looksLike: g.looksLike || '',
-      f: { name: '', brand: g.brand || '', model: '', category: g.category || '', condition: g.inBox ? 'New' : 'Used - Good', price: '', msrp: '', stock: 1, desc: '', specs: {} },
+      f: { name: '', brand: g.brand || '', model: '', category: g.category || '', condition: g.inBox ? 'New' : 'Used - Good', price: '', msrp: '', stock: 1, desc: '', specs: {}, storageLocation: S.location || '', priceResearch: null },
       edited: new Set(), ai: 'waiting',
     };
   }
@@ -202,6 +204,8 @@ function openBulkImport() {
     const kept = S.groups.filter(g => g.keep).length;
     body.innerHTML = `
       <div class="bi-summary">${ic('sparkles')}<span>Found <strong>${kept} appliance${kept === 1 ? '' : 's'}</strong> in ${S.items.length} photos. Check each group — use the arrows under a photo to move it, <strong>✂</strong> to start a new appliance from that photo, or <strong>Merge</strong> to join a group with the one above.</span></div>
+      <label class="af bi-loc-all"><span class="af-label">Storage location for all <span class="hint">staff only · you can change it per appliance below</span></span>
+        <input id="biLocAll" value="${esc(S.location || '')}" placeholder="e.g. Ramona, Tremont, Unit A" /></label>
       <div id="biGroups">${S.groups.map((g, n) => `<div class="bi-card" data-key="${g.key}"></div>`).join('')}</div>`;
     S.groups.forEach(renderCard);
   }
@@ -249,8 +253,10 @@ function openBulkImport() {
         <label class="af"><span class="af-label">Condition</span><select data-f="condition">${options(CONDITIONS, g.f.condition)}</select></label>
         <label class="af"><span class="af-label">Price ($)</span><input data-f="price" type="number" min="0" value="${esc(g.f.price)}" placeholder="Optional" /></label>
         <label class="af"><span class="af-label">Stock</span><input data-f="stock" type="number" min="1" value="${esc(g.f.stock)}" /></label>
+        <label class="af bi-loc"><span class="af-label">Location <span class="hint">staff only</span></span><input data-f="storageLocation" value="${esc(g.f.storageLocation)}" placeholder="e.g. Ramona" /></label>
         <label class="af bi-desc"><span class="af-label">Description</span><textarea data-f="desc" rows="2">${esc(g.f.desc)}</textarea></label>
       </div>
+      ${g.f.priceResearch ? priceRangeBox(g.f.priceResearch) : ''}
       ${g.check ? `<div class="ai-note">${ic('sparkles')}<span>Double-check: ${esc(g.check)}</span></div>` : ''}
       <div class="bi-actions">
         <button type="button" class="ai-btn small" data-act="price">${ic('search')}<span>Research price</span></button>
@@ -260,6 +266,17 @@ function openBulkImport() {
 
   // Field edits (no re-render, so typing isn't interrupted)
   body.addEventListener('input', e => {
+    if (e.target.id === 'biLocAll') {
+      S.location = e.target.value;
+      try { localStorage.setItem('oa_last_location', S.location.trim()); } catch {}
+      S.groups.forEach(g => {
+        if (g.edited.has('storageLocation')) return;
+        g.f.storageLocation = S.location;
+        const input = body.querySelector(`.bi-card[data-key="${g.key}"] [data-f="storageLocation"]`);
+        if (input) input.value = S.location;
+      });
+      return;
+    }
     const f = e.target.dataset.f; if (!f) return;
     const g = S.groups.find(x => x.key === e.target.closest('.bi-card')?.dataset.key); if (!g) return;
     g.f[f] = e.target.value; g.edited.add(f);
@@ -313,10 +330,9 @@ function openBulkImport() {
         const { pricing: r } = await apiPost('admin_ai_price', { product: { ...g.f } });
         if (r.suggestedPrice && !g.edited.has('price')) g.f.price = Math.round(r.suggestedPrice);
         if (r.msrp) g.f.msrp = Math.round(r.msrp);
+        g.f.priceResearch = priceResearchFrom(r);
         renderCard(g);
-        card.querySelector('.bi-price-note').innerHTML = r.suggestedPrice
-          ? `Suggested ${money2(r.suggestedPrice).replace('.00', '')}${r.rangeLow ? ` (range ${money2(r.rangeLow).replace('.00', '')}–${money2(r.rangeHigh).replace('.00', '')})` : ''} · ${esc(r.confidence)} confidence${r.msrp ? ` · MSRP ${money2(r.msrp).replace('.00', '')}` : ''}`
-          : 'Not enough price data found.';
+        if (!r.suggestedPrice) card.querySelector('.bi-price-note').textContent = 'Not enough price data found.';
       } catch (err) { note.textContent = '⚠️ ' + err.message; btn.disabled = false; }
     }
   });
@@ -347,7 +363,8 @@ function openBulkImport() {
         name: g.f.name || g.looksLike, brand: g.f.brand, model: g.f.model, category: g.f.category,
         condition: g.f.condition, price, msrp: parseFloat(g.f.msrp) || 0, refPrice: 0,
         stock: Math.max(1, parseInt(g.f.stock, 10) || 1), desc: g.f.desc, specs: g.f.specs || {},
-        imageUrl: '', internalPhotos: urls.join(', '), storageLocation: '',
+        imageUrl: '', internalPhotos: urls.join(', '), storageLocation: String(g.f.storageLocation || '').trim(),
+        priceResearch: g.f.priceResearch || null,
         draft: !(publish && price > 0),
       };
     });
@@ -358,7 +375,9 @@ function openBulkImport() {
     renderInventory(); renderDashboard();
     const live = records.filter(r => !r.draft).length, drafts = records.length - live;
     m.close();
-    showAdminToast(`✅ Added ${records.length} appliance${records.length === 1 ? '' : 's'}${live ? ` · ${live} live` : ''}${drafts ? ` · ${drafts} draft${drafts === 1 ? '' : 's'}` : ''} — website images will be found automatically (about 4 every 15 min)`);
+    showAdminToast(`✅ Added ${records.length} appliance${records.length === 1 ? '' : 's'}${live ? ` · ${live} live` : ''}${drafts ? ` · ${drafts} draft${drafts === 1 ? '' : 's'}` : ''} — now finding website images`);
+    // Start finding website images right away (one at a time, in the background)
+    setTimeout(() => findMissingWebImages(records.map(r => r.id)), 2500);
   }
   m.$('#biDrafts').addEventListener('click', () => save(false));
   m.$('#biPublish').addEventListener('click', () => save(true));
