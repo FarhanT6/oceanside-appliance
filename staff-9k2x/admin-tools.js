@@ -101,6 +101,22 @@ async function uploadPhoto(file) {
   return res.url;
 }
 
+// ─── Saved price research (staff only — never shown on the website) ───
+function priceResearchFrom(r) {
+  return { suggested: Math.round(r.suggestedPrice) || 0, low: Math.round(r.rangeLow) || 0, high: Math.round(r.rangeHigh) || 0,
+           msrp: Math.round(r.msrp) || 0, confidence: r.confidence || '', at: new Date().toISOString() };
+}
+function priceRangeBox(pr) {
+  const $ = n => '$' + Number(n).toLocaleString('en-US');
+  const when = pr.at ? new Date(pr.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  return `<div class="range-box">
+    <div><span class="af-label">Market range</span><strong>${pr.low && pr.high ? `${$(pr.low)} – ${$(pr.high)}` : '—'}</strong></div>
+    <div><span class="af-label">Suggested</span><strong>${pr.suggested ? $(pr.suggested) : '—'}</strong></div>
+    <div><span class="af-label">MSRP / new</span><strong>${pr.msrp ? $(pr.msrp) : '—'}</strong></div>
+    <div class="range-meta">Researched ${esc(when)}${pr.confidence ? ` · ${esc(pr.confidence)} confidence` : ''} · for your reference only</div>
+  </div>`;
+}
+
 // ─── Product editor (add + edit) ───
 function openProductEditor(id) {
   const existing = id ? getStore('inventory').find(p => p.id === id) : null;
@@ -108,6 +124,7 @@ function openProductEditor(id) {
   let photos = String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean); // staff-only inventory photos
   let web = imagesOf(p);                                                       // images customers see
   let uploading = 0;
+  let research = p.priceResearch || null;
   const specsText = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {}).map(([k, v]) => `${k}: ${v}`).join('\n');
 
   const m = openAdminModal({
@@ -151,6 +168,7 @@ function openProductEditor(id) {
           <label class="af"><span class="af-label">Stock *</span><input id="pe-stock" type="number" min="0" step="1" value="${esc(p.stock ?? 1)}" /></label>
           <label class="af"><span class="af-label">MSRP / retail ($)</span><input id="pe-msrp" type="number" min="0" value="${esc(p.msrp || '')}" placeholder="Shows savings" /></label>
           <label class="af"><span class="af-label">Competitor price ($)</span><input id="pe-ref" type="number" min="0" value="${esc(p.refPrice || '')}" placeholder="e.g. Lowe's price" /></label>
+          <div class="af span2" id="peRange">${p.priceResearch ? priceRangeBox(p.priceResearch) : ''}</div>
           <div class="af span2 price-agent" id="pePrice">
             <button type="button" class="ai-btn" id="pePriceBtn">${ic('search')}<span>Research the price online</span></button>
             <span class="hint">Searches the web for new &amp; used prices of this model (about 10–30¢)</span>
@@ -318,6 +336,7 @@ function openProductEditor(id) {
     out.innerHTML = '';
     try {
       const { pricing: r } = await apiPost('admin_ai_price', { product });
+      if (r.suggestedPrice || r.rangeLow) { research = priceResearchFrom(r); m.$('#peRange').innerHTML = priceRangeBox(research); }
       const conf = { high: ['High confidence', '#1e8449'], medium: ['Medium confidence', '#1a6fa8'], low: ['Low confidence — little data found', '#b9770e'] }[r.confidence] || ['', '#555'];
       out.innerHTML = `
         <div class="price-card">
@@ -371,7 +390,7 @@ function openProductEditor(id) {
       name, brand, category, price, stock: Math.max(0, stock),
       condition: val('#pe-condition'), model: val('#pe-model'),
       msrp: parseFloat(val('#pe-msrp')) || 0, refPrice: parseFloat(val('#pe-ref')) || 0,
-      storageLocation: val('#pe-location'), desc: val('#pe-desc'), specs,
+      storageLocation: val('#pe-location'), desc: val('#pe-desc'), specs, priceResearch: research,
       imageUrl: web.join(', '),
       internalPhotos: photos.join(', '),
       stockPhotos: web.length > 0 && m.$('#pe-stocklabel').checked,
@@ -828,4 +847,34 @@ async function draftFollowupsNow(btn) {
   } catch (err) {
     if (err.code === 'unauthorized') handleApiError(err, 'Follow-ups'); else showAdminToast('⚠️ ' + err.message);
   } finally { btn.disabled = false; btn.innerHTML = label; }
+}
+
+// ─── Website images: find them now for products that have none ───
+const imageJobs = new Set();
+async function findMissingWebImages(ids) {
+  const inv = getStore('inventory');
+  const todo = (ids || inv.filter(p => (p.stock || 0) > 0 && !String(p.imageUrl || '').trim()).map(p => p.id))
+    .filter(id => !imageJobs.has(id));
+  if (!todo.length) return showAdminToast(ids ? 'Nothing to look for' : '✅ Every in-stock product already has a website image');
+  todo.forEach(id => imageJobs.add(id));
+  renderInventory();
+  let found = 0;
+  for (const id of todo) {
+    try {
+      const { update } = await apiPost('admin_auto_images', { id, force: !ids });
+      const all = getStore('inventory');
+      const p = all.find(x => x.id === id);
+      if (p && update) { Object.assign(p, update); setStore('inventory', all); }
+      if (update && update.imageUrl) found++;
+    } catch (err) {
+      if (err.code === 'unauthorized') { handleApiError(err, 'Images'); break; }
+    } finally {
+      imageJobs.delete(id);
+      renderInventory();
+    }
+  }
+  [...todo].forEach(id => imageJobs.delete(id));
+  syncStorefront(); renderInventory();
+  const missed = todo.length - found;
+  showAdminToast(`🖼 Website images: found ${found} of ${todo.length}${missed ? ' — hover “No web image” to see why' : ''}`);
 }

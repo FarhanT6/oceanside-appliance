@@ -22,6 +22,7 @@
 //     POST {type:'admin_ai_group', key, photos}             → AI: groups a batch of photos by appliance
 //     POST {type:'admin_ai_find_images', key, product, refs} → AI agent: finds product images online
 //     POST {type:'admin_import_image', key, url}            → copies an online image into Drive
+//     POST {type:'admin_auto_images', key, id}              → AI: finds + saves website images now
 //     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //     POST {type:'admin_followups', key}                    → AI: drafts customer follow-ups now
 //     POST {type:'admin_ai_email', key, email}              → AI: drafts a reply to a customer email
@@ -214,6 +215,7 @@ function doPost(e) {
     if (type === 'admin_ai_price')     return jsonResponse(aiPriceResearch(data));
     if (type === 'admin_ai_group')     return jsonResponse(aiGroupPhotos(data));
     if (type === 'admin_ai_find_images') return jsonResponse({ success: true, candidates: findProductImages(data.product || {}, data.refs || []) });
+    if (type === 'admin_auto_images')  return jsonResponse(autoImagesEndpoint(data));
     if (type === 'admin_import_image') return jsonResponse(importImageFromUrl(data.url, data.name));
     if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_followups')    return jsonResponse(generateFollowups());
@@ -762,7 +764,8 @@ function extractPageImages(html, pageUrl) {
   return out.slice(0, 5);
 }
 
-function findProductImages(p, refs) {
+function findProductImages(p, refs, diag) {
+  diag = diag || {};
   const brand = clean(p.brand, 60), model = clean(p.model, 60), name = clean(p.name, 150), desc = clean(p.desc, 400);
   if (!model && !name) throw new Error('Add a model number or product name first.');
 
@@ -771,7 +774,9 @@ function findProductImages(p, refs) {
     `Find product pages for this exact appliance so we can use its official product photos.\n` +
     `Brand: ${brand || 'unknown'}\nModel number: ${model || 'unknown'}\nName: ${name}\n${desc ? 'Notes (may mention color/finish): ' + desc + '\n' : ''}\n` +
     `Prefer the manufacturer's own product page for this exact model number, then major retailers (Home Depot, Lowe's, Best Buy, AJ Madison, Abt). ` +
-    `Match the color/finish if the model number encodes it. Reply with up to 6 product page URLs, one per line, best first, and nothing else.` }];
+    `Good sources also include AJ Madison, Abt, Appliances Connection, Designer Appliances and Best Buy. Match the color/finish if the model number encodes it. ` +
+    `Reply with up to 6 product page URLs, one per line, best first. If the results showed direct image file links (.jpg/.png/.webp) of this exact model, ` +
+    `also list up to 4 of them on lines starting with "IMG: ". Nothing else.` }];
   const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 4 }];
   let text = '', sources = [];
   for (let i = 0; i < 4; i++) {
@@ -784,19 +789,24 @@ function findProductImages(p, refs) {
     if (json.stop_reason !== 'pause_turn') break;
     messages.push({ role: 'assistant', content: json.content });
   }
+  const directImgs = (text.match(/IMG:\s*(https?:\/\/\S+)/g) || []).map(l => l.replace(/^IMG:\s*/, '').replace(/[.,;)\]]+$/, '')).slice(0, 4);
+  text = text.replace(/IMG:\s*\S+/g, '');
   const fromText = (text.match(/https?:\/\/[^\s)<>"'\]]+/g) || []).map(u => u.replace(/[.,;]+$/, ''));
   const known = {}; sources.forEach(u => { known[hostOf(u)] = true; });
   let pages = fromText.filter(u => known[hostOf(u)]).concat(sources);
   pages = pages.filter((u, i) => pages.indexOf(u) === i);
   pages.sort((a, b) => isMaker(b) - isMaker(a));
   pages = pages.slice(0, 6);
-  if (!pages.length) return [];
+  diag.pages = pages.length;
+  if (!pages.length && !directImgs.length) return [];
 
   // 2. Read the main images off each page
   const pageRes = UrlFetchApp.fetchAll(pages.map(u => ({ url: u, muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'en-US,en' } })));
-  let cands = [];
+  let cands = directImgs.map(u => ({ imageUrl: u, pageUrl: u, source: hostOf(u) }));
+  diag.opened = 0;
   pageRes.forEach((r, i) => {
     if (r.getResponseCode() !== 200) return;
+    diag.opened++;
     extractPageImages(r.getContentText().slice(0, 1500000), pages[i]).forEach(img => cands.push({ imageUrl: img, pageUrl: pages[i], source: hostOf(pages[i]) }));
   });
   const seenImg = {};
@@ -814,6 +824,7 @@ function findProductImages(p, refs) {
     if (!/^image\/(jpeg|png|webp|gif)$/.test(type) || bytes.length < 5000 || bytes.length > 5 * 1024 * 1024) return;
     usable.push(Object.assign({}, cands[i], { block: { type: 'image', source: { type: 'base64', media_type: type, data: Utilities.base64Encode(bytes) } } }));
   });
+  diag.images = usable.length;
   if (!usable.length) return [];
 
   const content = [];
@@ -846,34 +857,53 @@ function findProductImages(p, refs) {
     .sort((a, b) => b.score - a.score);
 }
 
+// Finds and saves website images for one product. Returns the fields to update.
+function autoImagesFor(p) {
+  const update = { id: p.id, imageSearchAt: new Date().toISOString(), imageSearchTries: (Number(p.imageSearchTries) || 0) + 1 };
+  try {
+    const refs = String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean);
+    const diag = {};
+    const picks = findProductImages(p, refs, diag)
+      .filter(c => (c.sameModel === 'yes' || c.sameModel === 'likely') && c.colorMatches !== 'no' && c.clean)
+      .slice(0, 3);
+    const saved = picks.map(c => importImageFromUrl(c.imageUrl, p.model || p.name)).filter(r => r.success);
+    if (saved.length) {
+      update.imageUrl = saved.map(r => r.url).join(', ');
+      update.stockPhotos = true;
+      update.imagesAutoPicked = true;
+      update.imageSources = picks.map(c => c.pageUrl).join(' ');
+      update.imageSearchNote = '';
+    } else {
+      update.imageSearchNote = !diag.pages && !diag.images ? 'No product pages found for this model online — check the model number.'
+        : !diag.images ? 'Found product pages, but the stores blocked the image download. Try "Find product images online" or paste an image link.'
+        : 'Found images, but none clearly matched this model and color.';
+    }
+  } catch (err) {
+    update.imageSearchNote = String(err && err.message || err).slice(0, 200);
+  }
+  withLock(() => upsertRecords('inventory', [update]));
+  return update;
+}
+
 // ▶ Runs every 15 minutes once setupAutomations() has been run:
 // finds website images for products that don't have any yet (4 per run).
+// A product that came up empty is retried up to 3 times, 6+ hours apart.
 function autoFindImages() {
   if (!PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY')) return;
-  const todo = readCollection('inventory')
-    .filter(p => !String(p.imageUrl || '').trim() && !p.imageSearchAt && (p.model || p.name))
-    .slice(0, 4);
-  todo.forEach(p => {
-    const update = { id: p.id, imageSearchAt: new Date().toISOString() };
-    try {
-      const refs = String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean);
-      const picks = findProductImages(p, refs)
-        .filter(c => (c.sameModel === 'yes' || c.sameModel === 'likely') && c.colorMatches !== 'no' && c.clean)
-        .slice(0, 3);
-      const saved = picks.map(c => importImageFromUrl(c.imageUrl, p.model || p.name)).filter(r => r.success);
-      if (saved.length) {
-        update.imageUrl = saved.map(r => r.url).join(', ');
-        update.stockPhotos = true;
-        update.imagesAutoPicked = true;
-        update.imageSources = picks.map(c => c.pageUrl).join(' ');
-      } else {
-        update.imageSearchNote = 'No matching product images found online.';
-      }
-    } catch (err) {
-      update.imageSearchNote = String(err && err.message || err).slice(0, 200);
-    }
-    withLock(() => upsertRecords('inventory', [update]));
-  });
+  const now = Date.now();
+  readCollection('inventory')
+    .filter(p => !String(p.imageUrl || '').trim() && (p.model || p.name) && (Number(p.stock) || 0) > 0)
+    .filter(p => !p.imageSearchAt || ((Number(p.imageSearchTries) || 1) < 3 && now - new Date(p.imageSearchAt).getTime() > 6 * 3600000))
+    .slice(0, 4)
+    .forEach(autoImagesFor);
+}
+
+// Staff panel: find images for one product right now
+function autoImagesEndpoint(d) {
+  const p = readCollection('inventory').find(x => x.id === d.id);
+  if (!p) return fail('Product not found.');
+  if (String(p.imageUrl || '').trim() && !d.force) return { success: true, update: { id: p.id, imageUrl: p.imageUrl } };
+  return { success: true, update: autoImagesFor(p) };
 }
 
 // ─── PHOTO GROUPING (bulk import) ───

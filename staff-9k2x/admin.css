@@ -749,3 +749,21 @@
   .fu-actions .card-btn.primary { flex: 1 1 100%; padding: .7rem; }
   .fu-spacer { display: none; }
 }
+
+/* ── Saved price research ── */
+.range-box { display: grid; grid-template-columns: repeat(3, 1fr); gap: .25rem .75rem; padding: .7rem .85rem; border: 1px dashed #b8a4f0; border-radius: 10px; background: #faf7ff; }
+.range-box .af-label { display: block; margin-bottom: .1rem; }
+.range-box strong { font-size: .98rem; color: var(--navy); }
+.range-box .range-meta { grid-column: 1 / -1; font-size: .72rem; color: var(--gray-mid); }
+.bi-card .range-box { margin-top: .6rem; }
+.inv-range { margin-top: .2rem; font-size: .7rem; color: #5b3cc4; white-space: nowrap; }
+.draft-tag.busy { background: #f6f1ff; color: #5b3cc4; }
+.bi-loc-all { display: block; margin: .75rem 0 1rem; max-width: 420px; }
+.bi-loc-all input { width: 100%; }
+.bi-fields .bi-loc { grid-column: span 2; }
+.bi-fields .bi-desc { grid-column: span 5; }
+@media (max-width: 1000px) { .bi-fields .bi-loc, .bi-fields .bi-desc { grid-column: 1 / -1; } }
+@media (max-width: 600px) {
+  .range-box { grid-template-columns: 1fr 1fr; }
+  .inv-actions .card-btn[onclick^="findMissing"] { grid-column: span 3; }
+}
