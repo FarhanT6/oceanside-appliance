@@ -62,6 +62,9 @@ function showStep(step) {
     el.querySelector('.step-dot').innerHTML = i < step ? icon('check') : i;
   }
   document.getElementById('checkoutModal').scrollTop = 0;
+  // Move keyboard / screen-reader focus to the new step
+  const first = document.querySelector(`#checkoutStep${step} input:not([type=hidden]):not(.hp input), #checkoutStep${step} button`);
+  if (step !== 3) setTimeout(() => first?.focus({ preventScroll: true }), 50);
 }
 
 function totals() {
@@ -167,7 +170,7 @@ async function submitOrder() {
   };
 
   sendCustomerEmail(order, payload);
-  showConfirmation(order, payload, !!res.unconfirmed);
+  showConfirmation(order, payload);
   orderCompleted = true;
   clearCart();
   loadProducts(); // pull the new stock levels
@@ -194,11 +197,10 @@ async function sendCustomerEmail(order, c) {
   }
 }
 
-function showConfirmation(order, c, unconfirmed) {
+function showConfirmation(order, c) {
   const row = (k, v) => `<div class="review-detail-row"><span>${k}</span><span>${v}</span></div>`;
-  document.getElementById('confirmationSubtitle').textContent = unconfirmed
-    ? `Thanks, ${c.firstName}! We received your request and will call ${c.phone} shortly to confirm.`
-    : `Thanks, ${c.firstName}! We'll call ${c.phone} shortly to confirm and set up ${c.fulfillment === 'delivery' ? 'delivery' : 'pickup'}. A copy is on its way to ${c.email}.`;
+  document.getElementById('confirmationSubtitle').textContent =
+    `Thanks, ${c.firstName}! We'll call ${c.phone} shortly to confirm and set up ${c.fulfillment === 'delivery' ? 'delivery' : 'pickup'}. We'll also email a copy to ${c.email}.`;
   document.getElementById('confirmationDetails').innerHTML =
     (order.orderId ? row('Order number', `<strong>${esc(order.orderId)}</strong>`) : '') +
     row('Items', esc((order.lineItems || []).map(l => `${l.name} × ${l.qty}`).join(', ') || order.items)) +

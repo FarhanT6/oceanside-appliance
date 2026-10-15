@@ -72,8 +72,17 @@ function updateCartUI(bump = false) {
   // Once inventory is known, drop items that no longer exist and cap quantities at stock
   if (productsState === 'ready') {
     const before = JSON.stringify(cart);
-    cart = cart.filter(i => getProduct(i.id));
-    if (JSON.stringify(cart) !== before) saveCart();
+    const gone = [];
+    cart = cart.filter(i => {
+      const p = getProduct(i.id);
+      if (!p || p.stock <= 0) { if (p) gone.push(p.name); return false; }
+      if (i.qty > p.stock) i.qty = p.stock;
+      return true;
+    });
+    if (JSON.stringify(cart) !== before) {
+      saveCart();
+      showToast(gone.length ? `Updated your cart — ${gone.join(', ')} just sold` : 'Updated your cart to what’s still available', { type: 'alert' });
+    }
   }
 
   const count = cartCount();
@@ -89,7 +98,8 @@ function updateCartUI(bump = false) {
   footer.hidden = !lines.length;
 
   if (!lines.length) {
-    container.innerHTML = `<div class="cart-empty">${icon('cart')}<p>${productsState === 'loading' && cart.length ? 'Loading your cart…' : 'Your cart is empty.'}</p>
+    container.innerHTML = `<div class="cart-empty">${icon('cart')}<p>${productsState === 'loading' && cart.length ? 'Loading your cart…'
+      : productsState === 'error' && cart.length ? `We couldn't load your cart right now. Please refresh, or call ${BUSINESS_PHONE}.` : 'Your cart is empty.'}</p>
       <a href="#products" class="btn-outline" data-close>Browse appliances</a></div>`;
     return;
   }

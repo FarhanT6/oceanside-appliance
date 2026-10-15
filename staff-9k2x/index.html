@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="../css/styles.css?v=14" />
-  <link rel="stylesheet" href="admin.css?v=14" />
+  <link rel="stylesheet" href="../css/styles.css?v=15" />
+  <link rel="stylesheet" href="admin.css?v=15" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -137,7 +137,7 @@
           <div class="kpi-icon" style="background:rgba(26,111,168,0.1);color:var(--ocean)"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg></div>
           <div class="kpi-value" id="kpi-revenue">$0</div>
           <div class="kpi-label">Total Revenue</div>
-          <div class="kpi-change neutral" id="kpi-revenue-sub">Excludes cancelled orders</div>
+          <div class="kpi-change neutral" id="kpi-revenue-sub">Completed sales only</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-icon" style="background:rgba(39,174,96,0.1);color:var(--success)"><svg class="ic"><use href="../img/icons.svg#i-cart"/></svg></div>
@@ -201,7 +201,7 @@
           <button class="card-btn" onclick="clearViewRequests()">Clear All</button>
         </div>
         <table class="admin-table">
-          <thead><tr><th>Date</th><th>Name</th><th>Phone</th><th>Email</th><th>Appliance</th><th>Best Time</th></tr></thead>
+          <thead><tr><th>Date</th><th>Name</th><th>Phone</th><th>Email</th><th>Appliance</th><th>Best Time</th><th>Status</th></tr></thead>
           <tbody id="viewRequestsTbody"></tbody>
         </table>
       </div>
@@ -219,7 +219,7 @@
             <button class="card-btn" onclick="exportCSV('sales')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> Export CSV</button>
           </div>
         </div>
-        <table class="admin-table">
+        <table class="admin-table stack-sm">
           <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Channel</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="salesTbody"></tbody>
         </table>
@@ -237,7 +237,7 @@
             <button class="card-btn" onclick="exportCSV('repairs')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> Export CSV</button>
           </div>
         </div>
-        <table class="admin-table">
+        <table class="admin-table stack-sm">
           <thead><tr><th>Ticket</th><th>Customer</th><th>Phone</th><th>Appliance</th><th>Problem</th><th>Scheduled</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="repairsTbody"></tbody>
         </table>
@@ -356,9 +356,9 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=14"></script>
-<script src="admin-tools.js?v=14"></script>
-<script src="bulk-import.js?v=14"></script>
+<script src="admin.js?v=15"></script>
+<script src="admin-tools.js?v=15"></script>
+<script src="bulk-import.js?v=15"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

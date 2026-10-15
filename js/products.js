@@ -79,7 +79,7 @@ async function loadProducts() {
     setProducts(data.products, 'ready');
   } catch (err) {
     console.warn('Could not load inventory from Google Sheets', err);
-    if (!cached || !cached.length) { productsState = 'error'; applyFilters(); }
+    if (!cached || !cached.length) { productsState = 'error'; applyFilters(); updateCartUI(); }
   }
 }
 
@@ -148,7 +148,7 @@ function renderCategoryChips() {
   const total = PRODUCTS.filter(p => p.stock > 0).length;
   const cats = CATEGORIES.filter(c => c.id !== 'other' || counts.other);
   const chip = (id, label, count, ic) => `
-    <button type="button" class="chip${PRODUCTS.length && !count ? ' empty' : ''}" role="tab" data-cat="${id}" aria-selected="${currentFilters.type === id}">
+    <button type="button" class="chip${PRODUCTS.length && !count ? ' empty' : ''}" data-cat="${id}" aria-pressed="${currentFilters.type === id}">
       ${icon(ic)}${esc(label)}${PRODUCTS.length ? `<span class="count">${count || 0}</span>` : ''}
     </button>`;
   wrap.innerHTML = chip('', 'All', total, 'all') + cats.map(c => chip(c.id, c.label, counts[c.id], c.id)).join('');
@@ -228,8 +228,8 @@ function renderProducts(list) {
   grid.innerHTML = list.map((p, i) => {
     const imgs = productImages(p);
     const out = p.stock <= 0;
-    const compare = Math.max(p.msrp, p.refPrice, Number(p.oldPrice) || 0);
-    const save = compare > p.price ? compare - p.price : 0;
+    const compare = wasPrice(p);
+    const save = compare ? compare - p.price : 0;
     const catLabel = CATEGORY_SINGULAR[p.category] || 'Appliance';
     const stockClass = out ? ' out' : p.stock <= 2 ? ' low' : '';
     const stockText = out ? 'Sold out' : p.stock <= 2 ? `Only ${p.stock} left` : 'In stock';
@@ -271,7 +271,8 @@ function openModal(id) {
   const p = getProduct(id); if (!p) return;
   const imgs = productImages(p);
   const out = p.stock <= 0;
-  const compare = Math.max(p.msrp, p.refPrice, Number(p.oldPrice) || 0);
+  const compare = wasPrice(p);
+  const note = retailNote(p);
   const specs = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {});
   if (p.model) specs.unshift(['Model', p.model]);
   if (p.condition) specs.unshift(['Condition', p.condition]);
@@ -286,8 +287,7 @@ function openModal(id) {
       <div class="pm-meta">${esc([p.brand, CATEGORY_SINGULAR[p.category]].filter(Boolean).join(' · '))}</div>
       <h2 class="modal-name" id="modalTitle">${esc(p.name)}</h2>
       <div class="modal-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
-      ${p.msrp > p.price ? `<div class="product-savings">${icon('check')} Save ${money(p.msrp - p.price)} off MSRP</div>` : ''}
-      ${p.refPrice > p.price ? `<div class="product-savings">${icon('check')} Beats competitor price of ${money(p.refPrice)}</div>` : ''}
+      ${note ? `<div class="product-savings${isNew(p) ? '' : ' plain'}">${isNew(p) ? icon('check') + ' ' : ''}${note}</div>` : ''}
       <div class="stock-bar"><span class="stock-dot${out ? ' out' : p.stock <= 2 ? ' low' : ''}"></span><span>${out ? 'Sold out' : p.stock <= 2 ? `Only ${p.stock} left` : 'In stock and ready'}</span></div>
       ${p.desc ? `<p class="modal-desc">${esc(p.desc)}</p>` : ''}
       ${specs.length ? `<div class="modal-specs">${specs.map(([k, v]) => `<div class="spec-item"><strong>${esc(k)}</strong>${esc(v)}</div>`).join('')}</div>` : ''}

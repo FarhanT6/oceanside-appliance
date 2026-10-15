@@ -66,7 +66,9 @@ function openAdminModal({ title, body, footer = '', size = '', dismissable = tru
   document.addEventListener('keydown', onKey);
   ov.close = close;
   ov.$ = sel => ov.querySelector(sel);
-  setTimeout(() => ov.querySelector('input:not([type=hidden]):not([type=file]), select, textarea')?.focus(), 50);
+  // On touch screens don't focus a field (it would pop the keyboard up over the form)
+  if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => ov.querySelector('input:not([type=hidden]):not([type=file]), select, textarea')?.focus(), 50);
+  else setTimeout(() => ov.querySelector('.am-x')?.focus({ preventScroll: true }), 50);
   return ov;
 }
 
@@ -136,6 +138,15 @@ function openProductEditor(id) {
   let web = imagesOf(p);                                                       // images customers see
   let uploading = 0;
   let research = p.priceResearch || null;
+  // What the form showed when it opened — saving sends only the fields that differ from this
+  const opened = {
+    name: p.name || '', brand: p.brand || '', category: p.category || '', price: Number(p.price) || 0, stock: Math.max(0, parseInt(p.stock, 10) || 0),
+    condition: p.condition || '', model: p.model || '', msrp: Number(p.msrp) || 0, refPrice: Number(p.refPrice) || 0,
+    storageLocation: p.storageLocation || '', desc: p.desc || '', specs: p.specs && typeof p.specs === 'object' ? p.specs : {},
+    priceResearch: p.priceResearch || null, imageUrl: imagesOf(p).join(', '),
+    internalPhotos: String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean).join(', '),
+    stockPhotos: imagesOf(p).length > 0 && !!p.stockPhotos, draft: !!p.draft,
+  };
   const specsText = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {}).map(([k, v]) => `${k}: ${v}`).join('\n');
 
   const m = openAdminModal({
@@ -152,14 +163,14 @@ function openProductEditor(id) {
             <button type="button" class="ai-btn" id="peFind">${ic('search')}<span>Find product images online</span></button>
             <div id="peFindOut"></div>
             <div class="web-manual">
-              <button type="button" class="card-btn" id="peGoogle">${ic('external')} Search Google Images</button>
+              <button type="button" class="card-btn" id="peGoogle">${ic('external')} Search Google</button>
               <label class="card-btn upload-inline">${ic('camera')} Upload image<input type="file" id="peWebFiles" accept="image/*" multiple hidden /></label>
             </div>
             <div class="link-add">
               <input type="url" id="peLink" placeholder="…or paste an image link" />
               <button type="button" class="card-btn small" id="peLinkAdd">Add</button>
             </div>
-            <p class="hint web-tip">Found one yourself? Copy the image address (long-press the image on a phone) and paste it here, or save it and use “Upload image”.</p>
+            <p class="hint web-tip">“Search Google” looks up the model number in quotes — open Shopping or a store page, then copy the image address (long-press on a phone) and paste it here, or save it and use “Upload image”.</p>
             <label class="check-line"><input type="checkbox" id="pe-stocklabel" ${p.stockPhotos ? 'checked' : ''} /> Show a “Stock photo” label on the website</label>
           </div>
           <div class="pe-sec">
@@ -228,7 +239,7 @@ function openProductEditor(id) {
           <button type="button" data-remove="${i}" aria-label="Remove image">${ic('x')}</button>
           <button type="button" data-move="${i}" data-dir="1" ${i === web.length - 1 ? 'disabled' : ''} aria-label="Move right">${ic('chevron-right')}</button>
         </div>
-      </div>`).join('') || '<div class="photo-empty">No website images yet — use “Find product images online” or “Search Google Images”.</div>';
+      </div>`).join('') || '<div class="photo-empty">No website images yet — use “Find product images online” or “Search Google”.</div>';
   }
   renderPhotos();
   renderWeb();
@@ -390,12 +401,12 @@ function openProductEditor(id) {
     if (um) { m.$('#pe-msrp').value = Math.round(+um.dataset.useMsrp); m.$('#pe-msrp').classList.add('ai-filled'); showAdminToast('✅ MSRP filled in — save to keep it'); }
   });
 
-  // Same as searching Google Images for "MODEL" yourself
+  // Same as googling "MODEL" Brand yourself — then pick an image from Shopping or a store page
   m.$('#peGoogle').addEventListener('click', () => {
     const model = m.$('#pe-model').value.trim(), brand = m.$('#pe-brand').value.trim(), name = m.$('#pe-name').value.trim();
     const q = model ? `"${model}"${brand ? ' ' + brand : ''}` : name;
     if (!q) return showAdminToast('⚠️ Enter the model number or name first');
-    window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q), '_blank', 'noopener');
+    window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank', 'noopener');
   });
   // Upload images saved from the web (e.g. to the phone's photo library)
   m.$('#peWebFiles').addEventListener('change', async e => {
@@ -431,26 +442,37 @@ function openProductEditor(id) {
       const i = line.indexOf(':');
       if (i > 0 && line.slice(i + 1).trim()) specs[line.slice(0, i).trim()] = line.slice(i + 1).trim();
     });
-    const inv = getStore('inventory');
-    const record = existing ? inv.find(x => x.id === existing.id) : { id: 'PROD-' + Date.now(), createdAt: new Date().toISOString(), _custom: true, badge: null, oldPrice: null };
-    Object.assign(record, {
+    const fields = {
       name, brand, category, price, stock: Math.max(0, stock),
       condition: val('#pe-condition'), model: val('#pe-model'),
       msrp: parseFloat(val('#pe-msrp')) || 0, refPrice: parseFloat(val('#pe-ref')) || 0,
-      storageLocation: val('#pe-location'), desc: val('#pe-desc'), specs, priceResearch: research,
+      storageLocation: val('#pe-location'), desc: val('#pe-desc'), specs, priceResearch: research || null,
       imageUrl: web.join(', '),
       internalPhotos: photos.join(', '),
       stockPhotos: web.length > 0 && m.$('#pe-stocklabel').checked,
-      imagesAutoPicked: false,
       draft: !m.$('#pe-live').checked,
-      stockStatus: stock <= 0 ? 'out' : 'in-stock',
-    });
-    if (!existing) inv.push(record);
+    };
+    const inv = getStore('inventory');
+    let send;
+    if (existing) {
+      const record = inv.find(x => x.id === existing.id);
+      if (!record) { m.close(); return showAdminToast('⚠️ This product was removed (maybe on another device) — nothing saved'); }
+      // Only send what was changed in this window, so newer data saved elsewhere is never overwritten
+      send = { id: existing.id };
+      Object.keys(fields).forEach(k => { if (JSON.stringify(fields[k]) !== JSON.stringify(opened[k])) send[k] = fields[k]; });
+      if (send.stock !== undefined) send._expectStock = opened.stock;
+      if (existing.imagesAutoPicked) send.imagesAutoPicked = false; // you've now reviewed them
+      if (Object.keys(send).length === 1) { m.close(); return showAdminToast('Nothing changed'); }
+      Object.assign(record, send); delete record._expectStock;
+    } else {
+      send = Object.assign({ id: 'PROD-' + Date.now(), createdAt: new Date().toISOString() }, fields);
+      inv.push(Object.assign({}, send));
+    }
     setStore('inventory', inv);
     syncStorefront();
     renderInventory();
     renderDashboard();
-    saveRemote('inventory', [record], 'Edit product');
+    saveRemote('inventory', [send], 'Edit product');
     m.close();
     showAdminToast(existing ? `✅ ${name} saved` : `✅ ${name} added`);
   });
@@ -615,13 +637,13 @@ function openRecordSale(id) {
       itemCount: c.qty, subtotal: c.subtotal, tax: c.tax, deliveryFee: 0, total: c.total,
       fulfillment: 'pickup', internalNotes: m.$('#rs-notes').value.trim(),
     };
-    p.stock = Math.max(0, (p.stock || 0) - c.qty);
-    p.stockStatus = p.stock <= 0 ? 'out' : 'in-stock';
+    const before = p.stock || 0;
+    p.stock = Math.max(0, before - c.qty);
     setStore('inventory', inv);
     setStore('sales', [sale, ...getSales()]);
     syncStorefront();
-    saveRemote('sales', [sale]);
-    saveRemote('inventory', [p], 'Record sale');
+    saveRemote('sales', [sale], 'Record sale');
+    saveRemote('inventory', [{ id: p.id, stock: p.stock, _expectStock: before }], 'Record sale');
     renderInventory(); renderSales(); renderDashboard();
     m.close();
     showAdminToast(`✅ Sale recorded — ${p.name}${p.stock <= 0 ? ' is now sold out on the website' : ''}`);
@@ -673,11 +695,13 @@ function openOrderDetail(orderId) {
   m.$('#od-save').addEventListener('click', () => {
     const sales = getSales();
     const rec = sales.find(x => x.orderId === orderId);
+    if (!rec) { m.close(); return showAdminToast('⚠️ This order was removed — nothing saved'); }
     rec.internalNotes = m.$('#od-notes').value.trim();
     setStore('sales', sales);
     const newStatus = m.$('#od-status').value;
+    saveRemote('sales', [{ orderId, internalNotes: rec.internalNotes }], 'order notes');
     if (newStatus !== rec.status) updateSaleStatus(orderId, newStatus); // also saves + handles restock
-    else { saveRemote('sales', [rec]); renderSales(); }
+    else renderSales();
     m.close();
     showAdminToast('✅ Order saved');
   });
@@ -726,6 +750,7 @@ function openRepairDetail(ticketId, { askPayment = false } = {}) {
       const res = await apiPost('admin_ai_repair', { ticketId, force: run.dataset.aiRun === 'again' });
       const repairs = getRepairs();
       const rec = repairs.find(x => x.ticketId === ticketId);
+      if (!rec) return;
       rec.aiTriage = res.triage; rec.aiAt = res.at; rec.aiTriageError = '';
       setStore('repairs', repairs);
       m.$('#rd-ai').innerHTML = aiTriageHtml(rec);
@@ -740,6 +765,7 @@ function openRepairDetail(ticketId, { askPayment = false } = {}) {
   m.$('#rd-save').addEventListener('click', () => {
     const repairs = getRepairs();
     const rec = repairs.find(x => x.ticketId === ticketId);
+    if (!rec) { m.close(); return showAdminToast('⚠️ This request was removed — nothing saved'); }
     const when = m.$('#rd-when').value;
     rec.status = m.$('#rd-status').value;
     rec.scheduledFor = when ? new Date(when).toISOString() : '';
@@ -760,7 +786,8 @@ function openRepairDetail(ticketId, { askPayment = false } = {}) {
       rec.paymentLogged = entry.id;
     }
     setStore('repairs', repairs);
-    saveRemote('repairs', [rec]);
+    saveRemote('repairs', [{ ticketId, status: rec.status, scheduledFor: rec.scheduledFor, assignedTo: rec.assignedTo,
+      internalNotes: rec.internalNotes, paymentLogged: rec.paymentLogged || '' }], 'repair details');
     renderRepairs(); renderDashboard();
     m.close();
     showAdminToast(rec.paymentLogged && amount > 0 ? '✅ Saved and payment logged' : '✅ Repair saved');
@@ -814,9 +841,11 @@ async function sendBriefingNow(btn) {
 }
 
 // ─── FOLLOW-UPS (AI drafts, sent by you) ───
+const followupDrafts = {}; // text you've edited but not sent yet, kept across refreshes
 function renderFollowups() {
   const list = document.getElementById('followupsList');
   if (!list) return;
+  list.querySelectorAll('.fu-msg').forEach(t => { if (t.value !== t.defaultValue) followupDrafts[t.id.slice(6)] = t.value; });
   const open = getStore('followups').filter(f => f.status === 'open')
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   document.getElementById('fuCount').textContent = open.length ? open.length : '';
@@ -832,7 +861,7 @@ function renderFollowups() {
         <span class="fu-kind">${esc(f.kindLabel || '')}</span>
         <span class="fu-about">${esc(f.about || '')}</span>
       </div>
-      <textarea class="fu-msg" id="fumsg_${id}" rows="3" aria-label="Message to ${esc(f.customer)}">${esc(f.message)}</textarea>
+      <textarea class="fu-msg" id="fumsg_${id}" rows="3" aria-label="Message to ${esc(f.customer)}">${esc(followupDrafts[f.id] ?? f.message)}</textarea>
       <div class="fu-actions">
         ${f.phone ? `<button class="card-btn primary" onclick="sendFollowup('${id}','sms')">${ic('phone')} Text ${esc(f.phone)}</button>` : ''}
         ${f.email ? `<button class="card-btn" onclick="sendFollowup('${id}','email')">${ic('mail')} Email</button>` : ''}
@@ -850,7 +879,7 @@ function renderFollowups() {
   });
 }
 
-function followupText(id) { return (document.getElementById('fumsg_' + id)?.value || '').trim(); }
+function followupText(id) { return (document.getElementById('fumsg_' + id)?.value || followupDrafts[id] || '').trim(); }
 
 async function sendFollowup(id, how) {
   const f = getStore('followups').find(x => x.id === id);
@@ -878,9 +907,10 @@ async function closeFollowup(id, status) {
   if (!f) return;
   const message = followupText(id) || f.message;
   Object.assign(f, { status, message, closedAt: new Date().toISOString() });
+  delete followupDrafts[id];
   setStore('followups', all);
   renderFollowups();
-  await saveRemote('followups', [{ id, status, message, closedAt: f.closedAt }]);
+  await saveRemote('followups', [{ id, status, message, closedAt: f.closedAt }], 'follow-up ' + status);
 }
 
 async function draftFollowupsNow(btn) {
@@ -889,7 +919,7 @@ async function draftFollowupsNow(btn) {
   btn.innerHTML = `${ic('sparkles')} Drafting…`;
   try {
     const res = await apiPost('admin_followups');
-    await pullFromSheets({ silent: true });
+    await pullFromSheets({ silent: true, force: true });
     showAdminToast(res.created ? `✨ ${res.created} new follow-up${res.created > 1 ? 's' : ''} drafted` : 'Nothing new to follow up on right now');
   } catch (err) {
     if (err.code === 'unauthorized') handleApiError(err, 'Follow-ups'); else showAdminToast('⚠️ ' + err.message);
@@ -901,32 +931,32 @@ const imageJobs = new Set(), priceJobs = new Set();
 let jobChain = Promise.resolve();
 function queueJob(fn) { jobChain = jobChain.then(fn, fn); return jobChain; }
 
-async function runProductJobs({ type, ids, set, missing, label, force }) {
+async function runProductJobs({ type, ids, set, missing, label }) {
   const inv = getStore('inventory');
   const todo = (ids || inv.filter(p => (p.stock || 0) > 0 && missing(p)).map(p => p.id)).filter(id => !set.has(id));
   if (!todo.length) { if (!ids) showAdminToast(`✅ Nothing left to ${label}`); return; }
   todo.forEach(id => set.add(id));
-  renderInventory();
+  renderInventorySafely();
   return queueJob(async () => {
     let done = 0;
     for (const id of todo) {
       try {
-        const { update } = await apiPost(type, { id, force });
+        const { update } = await apiPost(type, { id });
         const all = getStore('inventory'); const p = all.find(x => x.id === id);
         if (p && update) { Object.assign(p, update); setStore('inventory', all); }
         if (update && (update.imageUrl || update.priceResearch)) done++;
       } catch (err) {
         if (err.code === 'unauthorized') { handleApiError(err, label); break; }
-      } finally { set.delete(id); renderInventory(); }
+      } finally { set.delete(id); renderInventorySafely(); }
     }
     todo.forEach(id => set.delete(id));
-    syncStorefront(); renderInventory();
+    syncStorefront(); renderInventorySafely();
     showAdminToast(`${type === 'admin_auto_images' ? '🖼 Website images' : '💲 Price research'}: ${done} of ${todo.length} done${done < todo.length ? ' — hover the tag to see why' : ''}`);
   });
 }
 
 function findMissingWebImages(ids) {
-  return runProductJobs({ type: 'admin_auto_images', ids, set: imageJobs, label: 'find images for', force: !ids,
+  return runProductJobs({ type: 'admin_auto_images', ids, set: imageJobs, label: 'find images for',
     missing: p => !String(p.imageUrl || '').trim() });
 }
 function researchMissingPrices(ids) {

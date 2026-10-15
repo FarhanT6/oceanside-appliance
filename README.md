@@ -83,6 +83,14 @@ Existing tabs in the old format are read automatically and converted to the new 
 
 To change the key later, run `setupAdminKey()` again and paste the new key into the staff panel.
 
+### Working in the spreadsheet
+
+- Run **`polishSheets`** once (also run by `setupAutomations`). It puts the tabs in order, color-codes them, formats prices and dates, adds dropdowns for status, category and condition, and builds an **Overview** tab with live totals (products in stock, inventory value, pending orders, sales and repair revenue this month, open repairs, follow-ups to send).
+- **Dark column headers can be edited in the sheet** and sync to the website and staff panel. Lighter headers are filled in automatically. Hover a header for a note. Leave the hidden `_data` column alone.
+- **Adding a row by hand works:** type at least a name, and an ID is created for it automatically. You can also copy a row to add a similar item; the copy becomes its own product.
+- **Every stock change is logged** in the Activity Log with what caused it: a website order, a staff panel save, Record sale, or an edit made directly in the Sheet.
+- **Stale stock is never written back:** the staff panel only sends what you changed. If stock changed elsewhere since your screen loaded (a website order, another device), your stock edit is refused, you see a note, and the screen refreshes.
+
 **After updating the script:** always re-deploy (Deploy → Manage deployments → ✏️ → New version). Photo upload needs Google Drive access, so the first time you update to a version with photo upload, run any function once (e.g. `initialSetup`) and approve the new Drive permission.
 
 ---

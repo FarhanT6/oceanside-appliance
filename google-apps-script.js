@@ -6,11 +6,13 @@
 //   PUBLIC (no key needed — used by the website):
 //     GET  ?action=products        → in-stock + sold-out catalog (public fields only)
 //     POST {type:'order'}          → places an order request, checks + decrements stock
+//                                     ('completed_sale' is an old name for the same thing)
 //     POST {type:'repair_request'} → logs a repair / sell-to-us request
 //     POST {type:'view_request'}   → logs a "view in person" request
 //     POST {type:'chat', chatId, messages} → website chat assistant (AI; daily cap)
 //
 //   STAFF ONLY (requires the admin key):
+//     POST {type:'admin_ping', key}                         → checks the key
 //     POST {type:'admin_pull', key}                         → everything
 //     POST {type:'admin_upsert', key, collection, records}  → add / update rows
 //     POST {type:'admin_delete', key, collection, ids}      → remove rows
@@ -32,8 +34,10 @@
 //   AI SETUP (optional): Project Settings → Script properties → add
 //   ANTHROPIC_API_KEY = your Claude API key. Then run setupAutomations() once
 //   so new repair requests are diagnosed automatically every 10 minutes, products
-//   without website images get them found automatically, follow-up messages are
-//   drafted at 6am and a morning briefing is emailed every day at 7am (Pacific).
+//   without website images or price research get them every 15 minutes, follow-up
+//   messages are drafted at 6am and a morning briefing is emailed at 7am (Pacific).
+//   setupAutomations also runs polishSheets(), which formats every tab and builds
+//   the Overview tab (safe to run again any time).
 //   Optional Script properties: REVIEW_LINK (your review page, used in follow-ups),
 //   BUSINESS_NOTES (extra facts for the chat + email assistants, e.g. hours or fees),
 //   CHAT_DAILY_LIMIT (max website chat messages per day, default 150).
@@ -50,6 +54,8 @@ const NOTIFY_EMAIL      = 'oceansideappliance96@gmail.com'; // owner alerts go h
 const SEND_OWNER_EMAILS = true;
 const TAX_RATE          = 0.0825; // Oceanside, CA
 
+const APPLIANCE_CATEGORIES = ['refrigerator', 'washer', 'dryer', 'dishwasher', 'oven', 'microwave', 'freezer', 'vacuum', 'other'];
+
 // Column flags
 const RO  = 1; // read-only in the sheet (display only; the hidden _data column wins)
 const NUM = 2;
@@ -61,12 +67,15 @@ const COLLECTIONS = {
   inventory: {
     sheet: 'Inventory', idKey: 'id',
     cols: [
-      ['Product ID', 'id', RO], ['Product Name', 'name'], ['Brand', 'brand'],
-      ['Category', 'category'], ['Condition', 'condition'], ['Model', 'model'],
-      ['Our Price ($)', 'price', NUM], ['MSRP ($)', 'msrp', NUM], ['Competitor Price ($)', 'refPrice', NUM],
-      ['Stock Qty', 'stock', INT], ['Storage Location', 'storageLocation'],
-      ['Image URL(s)', 'imageUrl'], ['Inventory Photos (staff)', 'internalPhotos'],
-      ['Description', 'desc'], ['Last Updated', 'updatedAt', RO]
+      ['Product ID', 'id', RO], ['Product Name', 'name'], ['Brand', 'brand'], ['Model', 'model'],
+      ['Category', 'category'], ['Condition', 'condition'],
+      ['Our Price ($)', 'price', NUM], ['Stock Qty', 'stock', INT],
+      // Display-only columns, worked out from the record
+      ['On Website', '_listing', RO, p => (Number(p.stock) || 0) <= 0 ? 'Sold out' : p.draft ? 'Draft' : 'Live'],
+      ['Market Range', '_range', RO, p => p.priceResearch && p.priceResearch.low ? '$' + p.priceResearch.low + '–$' + p.priceResearch.high : ''],
+      ['MSRP ($)', 'msrp', NUM], ['Competitor Price ($)', 'refPrice', NUM], ['Storage Location', 'storageLocation'],
+      ['Description', 'desc'], ['Image URL(s)', 'imageUrl'], ['Inventory Photos (staff)', 'internalPhotos'],
+      ['Last Updated', 'updatedAt', RO]
     ],
     legacy: {
       'Product ID': 'id', 'Product Name': 'name', 'Brand / Manufacturer': 'brand', 'Brand': 'brand',
@@ -156,7 +165,7 @@ const COLLECTIONS = {
     legacy: {}
   },
   chats: {
-    sheet: 'Website Chats', idKey: 'id', newestFirst: true, pull: false, keep: 400,
+    sheet: 'Website Chats', idKey: 'id', newestFirst: true, pull: false, keep: 150,
     cols: [
       ['Chat ID', 'id', RO], ['Started', 'timestamp', RO], ['Last Message', 'lastAt', RO],
       ['Messages', 'count', RO | INT], ['First Question', 'first', RO], ['Transcript', 'transcript', RO]
@@ -193,11 +202,12 @@ function doPost(e) {
   const type = data.type;
 
   try {
-    // Public, customer-facing requests
-    if (type === 'order' || type === 'completed_sale') return jsonResponse(withLock(() => placeOrder(data)));
-    if (type === 'repair_request') return jsonResponse(withLock(() => logRepair(data)));
-    if (type === 'view_request')   return jsonResponse(withLock(() => logViewRequest(data)));
-    if (type === 'chat')           return jsonResponse(websiteChat(data));
+    // Public, customer-facing requests (rate-limited so a bot can't flood the sheet or your inbox)
+    const busy = { success: false, error: `We're getting a lot of requests right now — please call us at (760) 754-8200.` };
+    if (type === 'order' || type === 'completed_sale') return jsonResponse(rateOk('order', 15) ? withLock(() => placeOrder(data)) : busy);
+    if (type === 'repair_request') return jsonResponse(rateOk('repair', 15) ? withLock(() => logRepair(data)) : busy);
+    if (type === 'view_request')   return jsonResponse(rateOk('view', 15) ? withLock(() => logViewRequest(data)) : busy);
+    if (type === 'chat')           return jsonResponse(rateOk('chat', 40) ? websiteChat(data) : { success: true, reply: busy.error, productIds: [], action: 'call' });
 
     // Everything else is staff-only
     if (!isAuthorized(data.key)) {
@@ -225,9 +235,9 @@ function doPost(e) {
     if (type === 'admin_upsert') {
       requireCollection(data.collection);
       return jsonResponse(withLock(() => {
-        upsertRecords(data.collection, Array.isArray(data.records) ? data.records : [], 'staff panel: ' + clean(data.reason, 60));
-        appendLog('admin_upsert', data.collection + ' × ' + (data.records || []).length);
-        return { success: true };
+        const conflicts = upsertRecords(data.collection, Array.isArray(data.records) ? data.records : [], 'staff panel: ' + clean(data.reason, 60));
+        appendLog('admin_upsert', data.collection + ' × ' + (data.records || []).length + (data.reason ? ' — ' + clean(data.reason, 60) : ''));
+        return { success: true, conflicts: conflicts };
       }));
     }
     if (type === 'admin_delete') {
@@ -240,8 +250,25 @@ function doPost(e) {
     }
     return jsonResponse({ success: false, error: 'Unknown request type' });
   } catch (err) {
-    return jsonResponse({ success: false, error: String(err && err.message || err) });
+    const msg = String(err && err.message || err);
+    if (/^(order|completed_sale|repair_request|view_request|chat)$/.test(type)) {
+      appendLog('error', type + ': ' + msg.slice(0, 300));
+      return jsonResponse({ success: false, error: 'Something went wrong on our end — please call us at (760) 754-8200.' });
+    }
+    return jsonResponse({ success: false, error: msg });
   }
+}
+
+// At most `limit` requests of one kind per 10 minutes across the whole site
+function rateOk(kind, limit) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const key = 'rate_' + kind + '_' + Math.floor(Date.now() / 600000);
+    const n = Number(cache.get(key)) || 0;
+    if (n >= limit) return false;
+    cache.put(key, String(n + 1), 700);
+  } catch (err) { /* cache unavailable — allow */ }
+  return true;
 }
 
 // ─── ORDERS ───
@@ -250,7 +277,7 @@ function placeOrder(d) {
 
   const sales = readCollection('sales');
   if (d.clientRef) {
-    const dup = sales.find(s => s.clientRef === d.clientRef);
+    const dup = sales.find(s => s.clientRef === clean(d.clientRef, 60));
     if (dup) return { success: true, order: publicOrder(dup) };
   }
 
@@ -271,12 +298,19 @@ function placeOrder(d) {
   const byId = {};
   inventory.forEach(p => { byId[p.id] = p; });
 
+  // Combine repeated lines for the same product so stock is checked against the total
+  const merged = [], seenLine = {};
+  lines.forEach(l => {
+    const id = String(l && l.id || ''), qty = Math.min(20, Math.max(1, parseInt(l && l.qty, 10) || 1));
+    if (seenLine[id]) seenLine[id].qty += qty; else merged.push(seenLine[id] = { id: id, qty: qty });
+  });
+
   let subtotal = 0, itemCount = 0;
   const itemTexts = [], resolved = [];
-  for (let i = 0; i < lines.length; i++) {
-    const qty = Math.max(1, parseInt(lines[i].qty, 10) || 1);
-    const p = byId[lines[i].id];
-    if (!p) return fail('One of the items in your cart is no longer available. Please refresh and try again.');
+  for (let i = 0; i < merged.length; i++) {
+    const qty = merged[i].qty;
+    const p = byId[merged[i].id];
+    if (!p || p.draft || !(Number(p.price) > 0)) return fail('One of the items in your cart is no longer available. Please refresh and try again.');
     if ((p.stock || 0) < qty) {
       return fail((p.stock || 0) > 0
         ? `Only ${p.stock} of "${p.name}" left — please update your cart.`
@@ -341,7 +375,7 @@ function logRepair(d) {
   if (d.website) return { success: true };
   const repairs = readCollection('repairs');
   if (d.clientRef) {
-    const dup = repairs.find(r => r.clientRef === d.clientRef);
+    const dup = repairs.find(r => r.clientRef === clean(d.clientRef, 60));
     if (dup) return { success: true, ticketId: dup.ticketId };
   }
   const r = {
@@ -376,7 +410,7 @@ function logViewRequest(d) {
   if (d.website) return { success: true };
   const views = readCollection('views');
   if (d.clientRef) {
-    const dup = views.find(v => v.clientRef === d.clientRef);
+    const dup = views.find(v => v.clientRef === clean(d.clientRef, 60));
     if (dup) return { success: true, requestId: dup.requestId };
   }
   const product = readCollection('inventory').find(p => p.id === d.productId);
@@ -417,14 +451,16 @@ function readCollection(name) {
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(h => String(h).trim());
   const dataCol = headers.indexOf('_data');
-  const records = [];
+  const records = [], seenIds = {};
 
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
     if (row.every(c => c === '' || c === null)) continue;
-    let rec;
+    let rec = null;
     if (dataCol >= 0 && row[dataCol]) {
-      try { rec = JSON.parse(row[dataCol]); } catch (err) { rec = {}; }
+      try { rec = JSON.parse(row[dataCol]); } catch (err) { rec = null; }
+    }
+    if (rec) {
       const savedStock = rec.stock;
       def.cols.forEach(col => {
         const [header, key, flags] = col;
@@ -440,14 +476,36 @@ function readCollection(name) {
         Object.defineProperty(rec, '_sheetEditFrom', { value: Number(savedStock), enumerable: false });
       }
     } else {
+      // A row typed in by hand (or with damaged _data): read every column we know by its header
       rec = fromLegacyRow(name, def, headers, row, r);
+      def.cols.forEach(col => {
+        const [header, key, flags, compute] = col;
+        const c = headers.indexOf(header);
+        if (compute || c < 0 || row[c] === '' || row[c] === null) return;
+        rec[key] = DATE_KEYS[key] && row[c] instanceof Date ? row[c].toISOString() : coerce(row[c], flags & (NUM | INT));
+      });
+      if (!rec[def.idKey]) rec[def.idKey] = manualId(name, row);
+      if (DATE_KEYS.timestamp && !rec.timestamp && name !== 'inventory') rec.timestamp = new Date().toISOString();
+    }
+    if (rec && rec[def.idKey] && seenIds[rec[def.idKey]]) {
+      // A copied row (e.g. duplicated in the Sheet to add a similar item) becomes its own record
+      rec[def.idKey] = manualId(name, row.concat([r]));
+      delete rec.clientRef;
     }
     if (rec && rec[def.idKey]) {
+      seenIds[rec[def.idKey]] = true;
       if (name === 'inventory') rec.stockStatus = (Number(rec.stock) || 0) > 0 ? 'in-stock' : 'out';
       records.push(rec);
     }
   }
   return records;
+}
+
+// Stable ID for a hand-typed row, so it keeps the same ID until it is saved
+function manualId(name, row) {
+  const prefix = { inventory: 'PROD', sales: 'ORD', repairs: 'TKT', views: 'VIEW', repairRevenue: 'RR', followups: 'FU', emails: 'MSG', chats: 'CHAT' }[name] || 'REC';
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, row.map(String).join('|'));
+  return prefix + '-M' + bytes.slice(0, 5).map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
 }
 
 function fromLegacyRow(name, def, headers, row, rowIndex) {
@@ -485,6 +543,42 @@ function fromLegacyRow(name, def, headers, row, rowIndex) {
   return rec;
 }
 
+// ─── SPREADSHEET LOOK & FEEL ───
+// Applied on every write, so the sheet always looks the same however it changed.
+const SHEET_COLORS = { header: '#1a2e44', headerRO: '#4a6177', band: '#f5f9fd', soldOut: '#9aa8b6' };
+const DATE_KEYS = { timestamp: 1, updatedAt: 1, lastAt: 1 };
+const COL_WIDTHS = {
+  id: 150, name: 280, brand: 110, model: 130, category: 110, condition: 130, price: 100, stock: 80, _listing: 100, _range: 120,
+  msrp: 95, refPrice: 125, storageLocation: 130, desc: 320, imageUrl: 180, internalPhotos: 180, updatedAt: 150,
+  orderId: 160, timestamp: 150, status: 115, channel: 140, firstName: 110, lastName: 110, phone: 125, email: 200, items: 300,
+  itemCount: 80, subtotal: 95, tax: 80, deliveryFee: 110, total: 95, fulfillment: 110, address: 240, availability: 170, notes: 240,
+  internalNotes: 240, ticketId: 150, scheduledFor: 150, requestType: 110, applianceType: 115, description: 320, assignedTo: 120,
+  requestId: 160, appliance: 240, preferredTime: 170, productId: 150, date: 100, customer: 160, amount: 100,
+  kindLabel: 150, about: 220, message: 380, ref: 160, from: 220, subject: 240, kind: 140, summary: 320, needsOwner: 240,
+  drafted: 100, lastAt: 150, count: 90, first: 320, transcript: 420
+};
+const STATUS_STYLE = {
+  pending: ['#fff4e0', '#8a5a00'], completed: ['#e3f5ea', '#1e7a46'], cancelled: ['#fdecea', '#a1342a'],
+  New: ['#e8f1fb', '#1a5e9a'], Scheduled: ['#efe9fd', '#5b3cc4'], 'In Progress': ['#fff4e0', '#8a5a00'],
+  Completed: ['#e3f5ea', '#1e7a46'], Cancelled: ['#f0f2f4', '#6f7c89'],
+  open: ['#fff4e0', '#8a5a00'], sent: ['#e3f5ea', '#1e7a46'], skipped: ['#f0f2f4', '#6f7c89'], 'no longer needed': ['#f0f2f4', '#6f7c89'],
+  Live: ['#e3f5ea', '#1e7a46'], Draft: ['#fff4e0', '#8a5a00'], 'Sold out': ['#f0f2f4', '#6f7c89']
+};
+const DROPDOWNS = {
+  sales: { status: ['pending', 'completed', 'cancelled'], channel: ['Website', 'In store', 'OfferUp', 'Facebook Marketplace', 'Craigslist', 'Other'] },
+  repairs: { status: ['New', 'Scheduled', 'In Progress', 'Completed', 'Cancelled'] },
+  inventory: { category: APPLIANCE_CATEGORIES, condition: ['New', 'New (Open Box)', 'Used - Excellent', 'Used - Good', 'Used - Fair', 'For Parts'] },
+  followups: { status: ['open', 'sent', 'skipped', 'no longer needed'] }
+};
+
+function cellValue(rec, col) {
+  const [, key, flags, compute] = col;
+  const v = compute ? compute(rec) : rec[key];
+  if (DATE_KEYS[key]) { const d = v ? new Date(v) : null; return d && !isNaN(d.getTime()) ? d : ''; }
+  if (flags & (NUM | INT)) return Number(v) || 0;
+  return v === undefined || v === null ? '' : String(v);
+}
+
 function writeCollection(name, records) {
   const def = COLLECTIONS[name];
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -495,54 +589,113 @@ function writeCollection(name, records) {
     records = records.slice().sort((a, b) =>
       new Date(b.timestamp || b.date || 0) - new Date(a.timestamp || a.date || 0));
     if (def.keep) records = records.slice(0, def.keep); // log tabs keep only the newest rows
+  } else if (name === 'inventory') {
+    // In stock first, then by name — easier to scan
+    records = records.slice().sort((a, b) => ((Number(b.stock) > 0) - (Number(a.stock) > 0)) || String(a.name || '').localeCompare(String(b.name || '')));
   }
 
-  const headers = def.cols.map(c => c[0]).concat(['_data']);
-  const rows = records.map(rec => def.cols.map(col => {
-    const [, key, flags] = col;
-    const v = rec[key];
-    if (key === 'timestamp' || key === 'updatedAt' || key === 'lastAt') return v ? formatStamp(v) : '';
-    if (flags & (NUM | INT)) return Number(v) || 0;
-    return v === undefined || v === null ? '' : String(v);
-  }).concat([JSON.stringify(rec)]));
-
-  sheet.clear();
+  const cols = def.cols;
+  const headers = cols.map(c => c[0]).concat(['_data']);
   const width = headers.length;
-  if (sheet.getMaxRows() < rows.length + 1) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length + 1 - sheet.getMaxRows());
+  const rows = records.map(rec => cols.map(col => cellValue(rec, col)).concat([JSON.stringify(rec)]));
+  const n = rows.length;
+  // Google Sheets cells hold at most 50,000 characters — refuse before touching the sheet
+  rows.forEach(row => row.forEach(v => {
+    if (typeof v === 'string' && v.length > 49000) throw new Error('A record is too large to save (over 49,000 characters). Shorten its text and try again.');
+  }));
+
+  // Make room first, write over the old rows, then clear only what's left below — a failure
+  // part-way never leaves the tab empty
+  if (sheet.getMaxRows() < n + 2) sheet.insertRowsAfter(sheet.getMaxRows(), n + 2 - sheet.getMaxRows());
   if (sheet.getMaxColumns() < width) sheet.insertColumnsAfter(sheet.getMaxColumns(), width - sheet.getMaxColumns());
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
   sheet.showColumns(1, width);
-  // Plain-text format stops Sheets from mangling phone numbers, IDs and zip codes
-  if (rows.length) {
-    def.cols.forEach((col, i) => {
-      if (!(col[2] & (NUM | INT))) sheet.getRange(2, i + 1, rows.length, 1).setNumberFormat('@');
+
+  // Header: dark = you can edit it here, lighter = filled in by the system
+  const head = sheet.getRange(1, 1, 1, width);
+  head.setValues([headers]).setFontColor('#ffffff').setFontWeight('bold').setFontSize(10).setVerticalAlignment('middle')
+    .setBackgrounds([cols.map(c => (c[2] & RO) ? SHEET_COLORS.headerRO : SHEET_COLORS.header).concat([SHEET_COLORS.headerRO])])
+    .setNotes([cols.map(c => (c[2] & RO) ? 'Filled in automatically — change it in the staff panel.' : 'You can edit this here; it syncs to the staff panel and website.')
+      .concat(['Internal data — do not edit.'])]);
+  sheet.setRowHeight(1, 30);
+
+  if (n) {
+    // Number formats per column; plain text stops Sheets from mangling phone numbers, IDs and zip codes
+    cols.forEach((col, i) => {
+      const r = sheet.getRange(2, i + 1, n, 1);
+      if (DATE_KEYS[col[1]]) r.setNumberFormat('mmm d, yyyy h:mm am/pm');
+      else if (col[2] & NUM) r.setNumberFormat('$#,##0.00');
+      else if (col[2] & INT) r.setNumberFormat('0');
+      else r.setNumberFormat('@');
+    });
+    sheet.getRange(1, 1, n + 1, width).clearNote();
+    const body = sheet.getRange(2, 1, n, width);
+    body.setValues(rows).setVerticalAlignment('top').setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setFontSize(10).setFontWeight('normal');
+    // Zebra rows, colored status cells, sold-out rows greyed out
+    const statusCols = cols.map((c, i) => (c[1] === 'status' || c[1] === '_listing') ? i : -1).filter(i => i >= 0);
+    const bgs = [], fonts = [];
+    rows.forEach((row, r) => {
+      const soldOut = name === 'inventory' && !(Number(records[r].stock) > 0);
+      const base = r % 2 ? SHEET_COLORS.band : '#ffffff';
+      bgs.push(row.map(() => base));
+      fonts.push(row.map(() => soldOut ? SHEET_COLORS.soldOut : '#1a2e44'));
+      statusCols.forEach(i => { const st = STATUS_STYLE[row[i]]; if (st) { bgs[r][i] = st[0]; fonts[r][i] = st[1]; } });
+    });
+    body.setBackgrounds(bgs).setFontColors(fonts);
+    // Dropdowns for columns with fixed choices (other values are still allowed, with a warning)
+    const dd = DROPDOWNS[name] || {};
+    cols.forEach((col, i) => {
+      if (!dd[col[1]] || (col[2] & RO)) return;
+      sheet.getRange(2, i + 1, n, 1).setDataValidation(
+        SpreadsheetApp.newDataValidation().requireValueInList(dd[col[1]], true).setAllowInvalid(true).build());
     });
   }
-  sheet.getRange(1, 1, 1, width).setValues([headers])
-    .setBackground('#1a2e44').setFontColor('#ffffff').setFontWeight('bold').setFontSize(10);
-  if (rows.length) sheet.getRange(2, 1, rows.length, width).setValues(rows);
+  // Clear leftovers below the data, then trim empty rows/columns from older layouts
+  const extra = sheet.getMaxRows() - (n + 1);
+  if (extra > 0) sheet.getRange(n + 2, 1, extra, sheet.getMaxColumns()).clear();
+  if (sheet.getMaxColumns() > width) sheet.deleteColumns(width + 1, sheet.getMaxColumns() - width);
+  if (sheet.getMaxRows() > n + 21) sheet.deleteRows(n + 22, sheet.getMaxRows() - (n + 21));
   sheet.setFrozenRows(1);
-  sheet.setColumnWidths(1, width - 1, 150);
+  sheet.setFrozenColumns(name === 'inventory' ? 2 : 1);
+  cols.forEach((col, i) => sheet.setColumnWidth(i + 1, COL_WIDTHS[col[1]] || 140));
   sheet.hideColumns(width);
 }
 
-function upsertRecords(name, incoming, source) {
+// opts.onlyExisting: ignore updates for records that no longer exist (background jobs)
+// opts.keepIfSet:    field names not to overwrite if the stored record already has a value
+// An inventory record may carry _expectStock (the stock the staff member saw). If the stored
+// stock has changed since, the stock edit is skipped and reported as a conflict.
+function upsertRecords(name, incoming, source, opts) {
+  opts = opts || {};
   const def = COLLECTIONS[name];
   const records = readCollection(name);
   const index = {};
   records.forEach((r, i) => { index[r[def.idKey]] = i; });
-  const stockLog = [];
+  const stockLog = [], conflicts = [];
   if (name === 'inventory') records.forEach(r => {
     if (r._sheetEditFrom !== undefined) stockLog.push(`${r.id} ${r.name}: ${r._sheetEditFrom} → ${r.stock} (edited in the Sheet)`);
   });
   incoming.forEach(rec => {
     if (!rec || !rec[def.idKey]) return;
+    rec = Object.assign({}, rec);
     const i = index[rec[def.idKey]];
+    if (i === undefined && opts.onlyExisting) return;
+    const cur = i === undefined ? null : records[i];
+    if (cur && opts.keepIfSet) opts.keepIfSet.forEach(k => {
+      const v = cur[k];
+      if (v !== undefined && v !== null && v !== '' && v !== 0) delete rec[k];
+    });
     if (name === 'inventory') {
+      const expect = rec._expectStock;
+      delete rec._expectStock;
+      if (cur && expect !== undefined && rec.stock !== undefined && Number(expect) !== (Number(cur.stock) || 0)) {
+        conflicts.push({ id: rec.id, name: cur.name, stock: Number(cur.stock) || 0 });
+        delete rec.stock;
+      }
       rec.updatedAt = new Date().toISOString();
-      if (rec.stock !== undefined) rec.stockStatus = (Number(rec.stock) || 0) > 0 ? 'in-stock' : 'out';
-      const before = i === undefined ? null : Number(records[i].stock) || 0;
+      const before = cur ? Number(cur.stock) || 0 : null;
       if (rec.stock !== undefined && before !== null && before !== (Number(rec.stock) || 0)) {
-        stockLog.push(`${rec.id} ${rec.name || records[i].name}: ${before} → ${rec.stock} (${source || 'update'})`);
+        stockLog.push(`${rec.id} ${rec.name || cur.name}: ${before} → ${rec.stock} (${source || 'update'})`);
       }
     }
     if (i === undefined) { index[rec[def.idKey]] = records.length; records.push(rec); }
@@ -550,6 +703,7 @@ function upsertRecords(name, incoming, source) {
   });
   writeCollection(name, records);
   stockLog.forEach(line => appendLog('stock_change', line));
+  return conflicts;
 }
 
 function deleteRecords(name, ids) {
@@ -602,14 +756,13 @@ function getPhotoFolder() {
 // ─── AI (Claude) ───
 // The API key lives only in Script Properties — never in the website code.
 const AI_MODEL = 'claude-opus-5';
-const APPLIANCE_CATEGORIES = ['refrigerator', 'washer', 'dryer', 'dishwasher', 'oven', 'microwave', 'freezer', 'vacuum', 'other'];
 
 function claudeRequest(body) {
   const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
   if (!key) throw new Error('AI is not set up yet. In Apps Script open Project Settings → Script properties and add ANTHROPIC_API_KEY.');
   body.model = AI_MODEL;
   body.fallbacks = 'default'; // if the model declines, Anthropic retries on its recommended fallback model
-  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+  const req = {
     method: 'post',
     contentType: 'application/json',
     headers: {
@@ -619,12 +772,17 @@ function claudeRequest(body) {
     },
     payload: JSON.stringify(body),
     muteHttpExceptions: true
-  });
+  };
+  let res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', req);
+  if ([429, 500, 502, 503, 529].indexOf(res.getResponseCode()) >= 0) { // busy or overloaded — one retry
+    Utilities.sleep(4000);
+    res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', req);
+  }
   const code = res.getResponseCode();
   let json;
   try { json = JSON.parse(res.getContentText()); } catch (err) { throw new Error('AI service returned an unreadable response (' + code + ').'); }
   if (code === 401) throw new Error('The Claude API key was rejected — check ANTHROPIC_API_KEY in Script properties.');
-  if (code === 429) throw new Error('The AI is busy right now — try again in a minute.');
+  if (code === 429 || code === 529) throw new Error('The AI is busy right now — try again in a minute.');
   if (code !== 200) throw new Error('AI request failed (' + code + '): ' + ((json.error && json.error.message) || 'unknown error'));
   if (json.stop_reason === 'refusal') throw new Error('The AI declined this request.');
   if (json.stop_reason === 'max_tokens') throw new Error('The AI response was cut off — try again.');
@@ -725,7 +883,7 @@ function aiRepairEndpoint(d) {
   if (r.aiTriage && !d.force) return { success: true, triage: r.aiTriage, at: r.aiAt };
   const triage = triageRepair(r);
   const at = new Date().toISOString();
-  withLock(() => upsertRecords('repairs', [{ ticketId: r.ticketId, aiTriage: triage, aiAt: at, aiTriageError: '' }]));
+  withLock(() => upsertRecords('repairs', [{ ticketId: r.ticketId, aiTriage: triage, aiAt: at, aiTriageError: '' }], 'AI', { onlyExisting: true }));
   return { success: true, triage: triage, at: at };
 }
 
@@ -844,12 +1002,15 @@ function findProductImages(p, refs, diag) {
   // 3. Download candidates and let Claude compare them with our unit
   const imgRes = UrlFetchApp.fetchAll(cands.map(c => ({ url: c.imageUrl, muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': BROWSER_UA } })));
   const usable = [];
+  let usableBytes = 0;
   imgRes.forEach((r, i) => {
     if (r.getResponseCode() !== 200) return;
     const blob = r.getBlob();
     const type = String(blob.getContentType() || '').split(';')[0];
     const bytes = blob.getBytes();
-    if (!/^image\/(jpeg|png|webp|gif)$/.test(type) || bytes.length < 5000 || bytes.length > 5 * 1024 * 1024) return;
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(type) || bytes.length < 5000 || bytes.length > 1.5 * 1024 * 1024) return;
+    if (usableBytes + bytes.length > 12 * 1024 * 1024) return; // keep the request well under the API's size limit
+    usableBytes += bytes.length;
     usable.push(Object.assign({}, cands[i], { block: { type: 'image', source: { type: 'base64', media_type: type, data: Utilities.base64Encode(bytes) } } }));
   });
   diag.images = usable.length;
@@ -885,21 +1046,30 @@ function findProductImages(p, refs, diag) {
     .sort((a, b) => b.score - a.score);
 }
 
+// Triggers may run 6 minutes at most; stop starting new work after ~4
+function timeBudget(ms) { const end = Date.now() + (ms || 4 * 60 * 1000); return () => Date.now() < end; }
+
+// Record an attempt before slow work, so a run that gets cut off still counts it
+function markAttempt(id, fields) {
+  withLock(() => upsertRecords('inventory', [Object.assign({ id: id }, fields)], 'attempt', { onlyExisting: true }));
+}
+
 // Finds and saves website images for one product. Returns the fields to update.
 function autoImagesFor(p) {
   const update = { id: p.id, imageSearchAt: new Date().toISOString(), imageSearchTries: (Number(p.imageSearchTries) || 0) + 1 };
+  markAttempt(p.id, { imageSearchAt: update.imageSearchAt, imageSearchTries: update.imageSearchTries });
   try {
     const refs = String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean);
     const diag = {};
     const picks = findProductImages(p, refs, diag)
       .filter(c => (c.sameModel === 'yes' || c.sameModel === 'likely') && c.colorMatches !== 'no' && c.clean)
       .slice(0, 3);
-    const saved = picks.map(c => importImageFromUrl(c.imageUrl, p.model || p.name)).filter(r => r.success);
-    if (saved.length) {
-      update.imageUrl = saved.map(r => r.url).join(', ');
+    const results = picks.map(c => ({ c: c, r: importImageFromUrl(c.imageUrl, p.model || p.name) })).filter(x => x.r.success);
+    if (results.length) {
+      update.imageUrl = results.map(x => x.r.url).join(', ');
       update.stockPhotos = true;
       update.imagesAutoPicked = true;
-      update.imageSources = picks.map(c => c.pageUrl).join(' ');
+      update.imageSources = results.map(x => x.c.pageUrl).join(' ');
       update.imageSearchNote = '';
     } else {
       update.imageSearchNote = !diag.pages && !diag.images ? 'No product pages found for this model online — check the model number.'
@@ -909,7 +1079,7 @@ function autoImagesFor(p) {
   } catch (err) {
     update.imageSearchNote = String(err && err.message || err).slice(0, 200);
   }
-  withLock(() => upsertRecords('inventory', [update], 'image finder'));
+  withLock(() => upsertRecords('inventory', [update], 'image finder', { onlyExisting: true, keepIfSet: ['imageUrl'] }));
   return update;
 }
 
@@ -918,12 +1088,12 @@ function autoImagesFor(p) {
 // A product that came up empty is retried up to 3 times, 6+ hours apart.
 function autoFindImages() {
   if (!PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY')) return;
-  const now = Date.now();
+  const now = Date.now(), more = timeBudget(3.5 * 60 * 1000);
   readCollection('inventory')
     .filter(p => !String(p.imageUrl || '').trim() && (p.model || p.name) && (Number(p.stock) || 0) > 0)
     .filter(p => !p.imageSearchAt || ((Number(p.imageSearchTries) || 1) < 3 && now - new Date(p.imageSearchAt).getTime() > 6 * 3600000))
-    .slice(0, 4)
-    .forEach(autoImagesFor);
+    .slice(0, 3)
+    .forEach(p => { if (more()) autoImagesFor(p); });
 }
 
 // Staff panel: find images for one product right now
@@ -1069,6 +1239,7 @@ function aiPriceResearch(d) {
 // Research one product's price and save it (range for reference; fills the price only if none is set)
 function autoPriceFor(p) {
   const update = { id: p.id, priceResearchAt: new Date().toISOString(), priceResearchTries: (Number(p.priceResearchTries) || 0) + 1 };
+  markAttempt(p.id, { priceResearchAt: update.priceResearchAt, priceResearchTries: update.priceResearchTries });
   try {
     const res = aiPriceResearch({ product: p });
     if (!res.success) throw new Error(res.error);
@@ -1076,8 +1247,9 @@ function autoPriceFor(p) {
     if (r.suggestedPrice || r.rangeLow) {
       update.priceResearch = { suggested: Math.round(r.suggestedPrice) || 0, low: Math.round(r.rangeLow) || 0, high: Math.round(r.rangeHigh) || 0,
         msrp: Math.round(r.msrp) || 0, confidence: r.confidence || '', at: res.at };
-      if (!(Number(p.price) > 0) && r.suggestedPrice) update.price = Math.round(r.suggestedPrice);
-      if (!(Number(p.msrp) > 0) && r.msrp) update.msrp = Math.round(r.msrp);
+      // Fill in a price only for drafts (never changes what customers see); MSRP stays in the
+      // research box so the website never shows an unverified "new retail" comparison
+      if (p.draft && r.suggestedPrice) update.price = Math.round(r.suggestedPrice);
       update.priceResearchNote = '';
     } else {
       update.priceResearchNote = 'Not enough price data found online.';
@@ -1085,7 +1257,7 @@ function autoPriceFor(p) {
   } catch (err) {
     update.priceResearchNote = String(err && err.message || err).slice(0, 200);
   }
-  withLock(() => upsertRecords('inventory', [update], 'price research'));
+  withLock(() => upsertRecords('inventory', [update], 'price research', { onlyExisting: true, keepIfSet: ['price'] }));
   return update;
 }
 
@@ -1093,12 +1265,12 @@ function autoPriceFor(p) {
 // researches prices for in-stock products that haven't been researched yet (3 per run).
 function autoResearchPrices() {
   if (!PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY')) return;
-  const now = Date.now();
+  const now = Date.now(), more = timeBudget(3.5 * 60 * 1000);
   readCollection('inventory')
     .filter(p => !p.priceResearch && (p.model || p.name) && (Number(p.stock) || 0) > 0)
     .filter(p => !p.priceResearchAt || ((Number(p.priceResearchTries) || 1) < 2 && now - new Date(p.priceResearchAt).getTime() > 6 * 3600000))
-    .slice(0, 3)
-    .forEach(autoPriceFor);
+    .slice(0, 4)
+    .forEach(p => { if (more()) autoPriceFor(p); });
 }
 
 function autoPriceEndpoint(d) {
@@ -1140,7 +1312,7 @@ function buildBriefing() {
     .map(p => ({ p: p, days: Math.floor((now - listedAt(p)) / DAY) }))
     .sort((a, b) => b.days - a.days).slice(0, 8);
 
-  const counted = s => s.status !== 'cancelled';
+  const counted = s => s.status === 'completed'; // reservations count once they're completed
   const sumSales = f => sales.filter(s => counted(s) && f(s)).reduce((t, s) => t + (Number(s.total) || 0), 0);
   const sumRR = f => repairRev.filter(f).reduce((t, r) => t + (Number(r.amount) || 0), 0);
   const month = today.slice(0, 7);
@@ -1234,8 +1406,10 @@ function htmlToText(h) {
 // Diagnoses new repair requests and emails the owner the result.
 function autoTriageRepairs() {
   if (!PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY')) return;
-  const todo = readCollection('repairs').filter(r => r.status === 'New' && !r.aiTriage && !r.aiTriageError).slice(0, 5);
+  const more = timeBudget(3.5 * 60 * 1000);
+  const todo = readCollection('repairs').filter(r => r.status === 'New' && !r.aiTriage && !r.aiTriageError && (Number(r.aiTries) || 0) < 3).slice(0, 4);
   todo.forEach(r => {
+    if (!more()) return;
     let update;
     try {
       const t = triageRepair(r);
@@ -1249,9 +1423,14 @@ function autoTriageRepairs() {
         'Draft text to send:', t.textMessageDraft
       ].filter(l => l !== ''), r.email);
     } catch (err) {
-      update = { ticketId: r.ticketId, aiTriageError: String(err && err.message || err).slice(0, 300) };
+      const msg = String(err && err.message || err).slice(0, 300);
+      const tries = (Number(r.aiTries) || 0) + 1;
+      // Busy/temporary errors are retried on the next run; anything else (or 3 tries) stops
+      update = /busy|try again|timed? ?out|overloaded|unreadable/i.test(msg) && tries < 3
+        ? { ticketId: r.ticketId, aiTries: tries }
+        : { ticketId: r.ticketId, aiTriageError: msg, aiTries: tries };
     }
-    withLock(() => upsertRecords('repairs', [update]));
+    withLock(() => upsertRecords('repairs', [update], 'AI', { onlyExisting: true }));
   });
 }
 
@@ -1264,6 +1443,7 @@ function setupAutomations() {
   ScriptApp.newTrigger('sendDailyBriefing').timeBased().everyDays(1).atHour(7).inTimezone('America/Los_Angeles').create();
   ScriptApp.newTrigger('autoFindImages').timeBased().everyMinutes(15).create();
   ScriptApp.newTrigger('autoResearchPrices').timeBased().everyMinutes(15).create();
+  try { polishSheets(); } catch (err) { Logger.log('Could not tidy the spreadsheet: ' + err); }
   ScriptApp.newTrigger('generateFollowups').timeBased().everyDays(1).atHour(6).inTimezone('America/Los_Angeles').create();
   Logger.log('On: repair diagnosis every 10 min, website image finder + price research every 15 min, follow-up drafts daily at 6am, morning briefing daily at 7am Pacific.');
 }
@@ -1415,7 +1595,7 @@ function generateFollowups() {
   }
   withLock(() => {
     if (created.length || closes.length) upsertRecords('followups', created.concat(closes));
-    if (repairUpdates.length) upsertRecords('repairs', repairUpdates);
+    if (repairUpdates.length) upsertRecords('repairs', repairUpdates, 'follow-ups', { onlyExisting: true });
   });
   return { success: true, created: created.length, closed: closes.length };
 }
@@ -1467,7 +1647,7 @@ function websiteChat(d) {
       const existing = readCollection('chats').find(c => c.id === chatId); // re-read inside the lock
       const line = (who, t) => `${who}: ${t}`;
       const transcript = ((existing && existing.transcript ? existing.transcript + '\n' : '') +
-        line('Customer', msgs[msgs.length - 1].content) + '\n' + line('Assistant', out.reply)).slice(-20000);
+        line('Customer', msgs[msgs.length - 1].content) + '\n' + line('Assistant', out.reply)).slice(-8000);
       upsertRecords('chats', [{
         id: chatId, timestamp: existing ? existing.timestamp : new Date().toISOString(), lastAt: new Date().toISOString(),
         count: (existing ? Number(existing.count) || 0 : 0) + 1, first: existing ? existing.first : msgs[msgs.length - 1].content.slice(0, 300),
@@ -1568,10 +1748,22 @@ function formatStamp(v) {
   return isNaN(d.getTime()) ? String(v) : Utilities.formatDate(d, 'America/Los_Angeles', 'MM/dd/yyyy h:mm a');
 }
 
+function rateOkDaily(kind, limit) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const key = 'day_' + kind + '_' + tzDay(Date.now());
+    const n = Number(cache.get(key)) || 0;
+    if (n >= limit) return false;
+    cache.put(key, String(n + 1), 21600);
+  } catch (err) { /* allow */ }
+  return true;
+}
+
 function notifyOwner(subject, lines, replyTo) {
   if (!SEND_OWNER_EMAILS || !NOTIFY_EMAIL) return;
   try {
-    const opts = { to: NOTIFY_EMAIL, name: 'Oceanside Appliance', subject: subject, body: lines.join('\n') };
+    if (!rateOkDaily('owner_email', 60)) return; // leaves room in Gmail's daily quota for the briefing
+    const opts = { to: NOTIFY_EMAIL, name: 'Oceanside Appliance', subject: String(subject).replace(/[\r\n]+/g, ' ').slice(0, 200), body: lines.join('\n') };
     if (replyTo && validEmail(replyTo)) opts.replyTo = replyTo;
     MailApp.sendEmail(opts);
   } catch (err) { /* never block a customer request on email */ }
@@ -1580,15 +1772,90 @@ function notifyOwner(subject, lines, replyTo) {
 function appendLog(type, summary) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName('Activity Log');
-    if (!sheet) {
-      sheet = ss.insertSheet('Activity Log');
-      sheet.getRange(1, 1, 1, 3).setValues([['Timestamp', 'Event', 'Summary']])
-        .setBackground('#1a2e44').setFontColor('#ffffff').setFontWeight('bold');
-      sheet.setFrozenRows(1);
-    }
+    const sheet = ss.getSheetByName('Activity Log') || ss.insertSheet('Activity Log');
+    if (sheet.getRange(1, 1).getValue() !== 'Timestamp') styleActivityLog(sheet);
     sheet.appendRow([new Date(), type, summary]);
+    if (sheet.getLastRow() > 3000) sheet.deleteRows(2, sheet.getLastRow() - 2500); // keep the newest 2,500
   } catch (err) { /* logging is best-effort */ }
+}
+
+function styleActivityLog(sheet) {
+  if (sheet.getRange(1, 1).getValue() !== 'Timestamp') {
+    sheet.insertRowBefore(1);
+    sheet.getRange(1, 1, 1, 3).setValues([['Timestamp', 'Event', 'Summary']]);
+  }
+  sheet.getRange(1, 1, 1, 3).setBackground('#1a2e44').setFontColor('#ffffff').setFontWeight('bold');
+  sheet.getRange('A:A').setNumberFormat('mmm d, yyyy h:mm:ss am/pm');
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 180); sheet.setColumnWidth(2, 140); sheet.setColumnWidth(3, 520);
+}
+
+// ▶ Run once (also run by setupAutomations): rebuilds every tab with the current
+// layout, puts the tabs in a sensible order with colors, and adds an Overview tab.
+function polishSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  withLock(() => Object.keys(COLLECTIONS).forEach(name => writeCollection(name, readCollection(name))));
+  styleActivityLog(ss.getSheetByName('Activity Log') || ss.insertSheet('Activity Log'));
+  buildOverview(ss);
+  const order = [['Overview', '#1a7fc1'], ['Inventory', '#1e9e5a'], ['Sales', '#1e9e5a'], ['Repair Requests', '#c9a84c'],
+    ['Viewing Requests', '#c9a84c'], ['Follow-ups', '#7c5ce0'], ['Repair Revenue', '#1e9e5a'], ['Customer Emails', '#7c5ce0'],
+    ['Website Chats', '#7c5ce0'], ['Activity Log', '#9aa8b6']];
+  order.forEach(([title, color], i) => {
+    const sh = ss.getSheetByName(title);
+    if (!sh) return;
+    sh.setTabColor(color);
+    ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1);
+  });
+  ss.setActiveSheet(ss.getSheetByName('Overview'));
+  Logger.log('Spreadsheet tidied: tabs reordered, formatting applied, Overview tab updated.');
+}
+
+// Live summary numbers (formulas, so they update by themselves)
+function buildOverview(ss) {
+  const sh = ss.getSheetByName('Overview') || ss.insertSheet('Overview', 0);
+  sh.clear();
+  const col = (name, key) => {
+    const i = COLLECTIONS[name].cols.findIndex(c => c[1] === key);
+    let n = i + 1, s = '';
+    while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+    return `'${COLLECTIONS[name].sheet}'!${s}2:${s}`;
+  };
+  const month = 'TEXT(TODAY(),"yyyy-mm")';
+  const rows = [
+    ['Oceanside Appliance — Overview', ''],
+    ['Updates automatically. The staff panel is the main place to make changes.', ''],
+    ['', ''],
+    ['INVENTORY', ''],
+    ['Products in stock', `=COUNTIF(${col('inventory', 'stock')},">0")`],
+    ['Units in stock', `=SUM(${col('inventory', 'stock')})`],
+    ['Inventory value (at our prices)', `=SUMPRODUCT(${col('inventory', 'price')},${col('inventory', 'stock')})`],
+    ['Live on the website', `=COUNTIF(${col('inventory', '_listing')},"Live")`],
+    ['Drafts (hidden from the website)', `=COUNTIF(${col('inventory', '_listing')},"Draft")`],
+    ['Sold out', `=COUNTIF(${col('inventory', '_listing')},"Sold out")`],
+    ['', ''],
+    ['SALES & REPAIRS', ''],
+    ['Orders waiting to be confirmed', `=COUNTIF(${col('sales', 'status')},"pending")`],
+    ['Completed sales this month', `=SUMPRODUCT((${col('sales', 'status')}="completed")*(TEXT(${col('sales', 'timestamp')},"yyyy-mm")=${month})*${col('sales', 'total')})`],
+    ['Repair revenue this month', `=SUMPRODUCT((LEFT(${col('repairRevenue', 'date')},7)=${month})*${col('repairRevenue', 'amount')})`],
+    ['Open repair requests', `=COUNTIF(${col('repairs', 'status')},"New")+COUNTIF(${col('repairs', 'status')},"Scheduled")+COUNTIF(${col('repairs', 'status')},"In Progress")`],
+    ['New viewing requests', `=COUNTIF(${col('views', 'status')},"New")`],
+    ['Follow-ups to send', `=COUNTIF(${col('followups', 'status')},"open")`],
+    ['', ''],
+    ['HOW THIS SPREADSHEET WORKS', ''],
+    ['• Each tab is one list (inventory, sales, repairs…). Newest items are at the top.', ''],
+    ['• Dark column headers can be edited here and sync to the website. Lighter headers are filled in automatically.', ''],
+    ['• Hover a column header to see a note about it. Don’t edit or unhide the last “_data” column.', ''],
+    ['• Every stock change is recorded in the Activity Log with where it came from.', ''],
+  ];
+  sh.getRange(1, 1, rows.length, 2).setValues(rows);
+  sh.getRange('A1').setFontSize(16).setFontWeight('bold').setFontColor('#1a2e44');
+  sh.getRange('A2').setFontColor('#6f849a');
+  ['A4', 'A12', 'A20'].forEach(a => sh.getRange(a).setFontWeight('bold').setFontColor('#1a7fc1'));
+  sh.getRange('B5:B10').setNumberFormat('#,##0'); sh.getRange('B7').setNumberFormat('$#,##0');
+  sh.getRange('B13:B18').setNumberFormat('#,##0'); sh.getRange('B14:B15').setNumberFormat('$#,##0.00');
+  sh.getRange('B5:B18').setFontWeight('bold').setHorizontalAlignment('right');
+  sh.setColumnWidth(1, 330); sh.setColumnWidth(2, 140);
+  sh.setHiddenGridlines(true);
 }
 
 function jsonResponse(obj) {

@@ -778,3 +778,25 @@
 .upload-inline { cursor: pointer; }
 .web-tip { margin: .1rem 0 0; font-size: .74rem; }
 .bi-auto-price { display: flex; align-items: center; gap: .45rem; margin-top: .75rem; font-size: .85rem; color: var(--navy); flex-wrap: wrap; }
+
+/* ── Phones: comfortable forms and card-style tables ── */
+@media (max-width: 600px) {
+  .am-modal, .am-modal.wide { max-height: 94dvh; }
+  .am-modal input, .am-modal select, .am-modal textarea, .table-search, .status-select, .bi-fields input, .bi-fields select, .bi-fields textarea { font-size: 16px !important; } /* 16px stops iOS zooming in */
+  .tile-actions button { width: 34px; height: 34px; }
+  .action-btn { width: 40px; height: 40px; }
+
+  .admin-card:has(.stack-sm) { overflow-x: visible; }
+  .stack-sm, .stack-sm tbody { display: block; }
+  .stack-sm thead { display: none; }
+  .stack-sm tr { display: block; padding: .75rem .25rem; border-bottom: 1px solid var(--gray-light); }
+  .stack-sm tr:hover td { background: none; }
+  .stack-sm td { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .3rem 0; border: none; white-space: normal !important; max-width: none !important; text-align: right; }
+  .stack-sm td::before { content: attr(data-label); flex-shrink: 0; font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--gray-mid); text-align: left; }
+  .stack-sm td:not([data-label])::before { content: none; }
+  .stack-sm td:first-child { font-size: .95rem; }
+  .stack-sm td.row-actions { justify-content: flex-end; }
+  .stack-sm tr:has(.section-row), .stack-sm tr:has(.empty-row) { padding: 0; border: none; }
+  .stack-sm .section-row, .stack-sm .empty-row { display: block; text-align: left; border-radius: 6px; }
+  .stack-sm .section-row::before, .stack-sm .empty-row::before { content: none; }
+}
