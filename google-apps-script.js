@@ -1459,7 +1459,7 @@ function businessFacts() {
     'Oceanside Appliance — locally owned since 1996.',
     'Store: 1016 S Tremont St, Oceanside, CA 92054. Phone: (760) 754-8200. Email: ' + NOTIFY_EMAIL + '. Website: ' + siteUrl(),
     'Sells new and quality used appliances, and repairs all major brands (Samsung, LG, Whirlpool, GE, Maytag, Bosch, KitchenAid, Frigidaire, Electrolux and more).',
-    'Serves all of San Diego County, focused on North County (Oceanside, Carlsbad, Vista, San Marcos, Escondido). Open 7 days a week, including evenings and holidays.',
+    'Serves all of San Diego County, focused on North County (Oceanside, Carlsbad, Vista, San Marcos, Escondido). Open 7 days a week, including evenings and holidays, for delivery, installation and service calls. Visiting the store is by appointment only — customers should call first to set up a time.',
     'Buying: customers reserve online with no payment; staff call to confirm, then the customer pays at pickup or delivery. Store pickup is by appointment. Delivery and installation are available; the delivery cost is quoted on the call.',
     'Customers can ask to see a used appliance in person before buying ("See it in person" on the website, or call).',
     'Condition labels: New = sealed in box. New (Open Box) = unused, box opened. Used – Excellent / Good / Fair describe cosmetic condition. For Parts = sold for parts only.',
