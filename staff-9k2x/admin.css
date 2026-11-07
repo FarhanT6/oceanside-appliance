@@ -522,6 +522,23 @@
 .tile-actions button { width: 26px; height: 26px; border: none; border-radius: 6px; background: rgba(255,255,255,.92); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; color: var(--navy); }
 .tile-actions button:disabled { opacity: .3; }
 .tile-actions .ic { width: 14px; height: 14px; }
+/* Move photos picker */
+.mv-photos { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); margin: .4rem 0 1rem; }
+.mv-pick { padding: 0; cursor: pointer; }
+.mv-pick .mv-check { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,.9); border: 2px solid var(--gray-light); display: flex; align-items: center; justify-content: center; color: transparent; }
+.mv-pick.on { outline: 3px solid var(--ocean); outline-offset: -3px; }
+.mv-pick.on .mv-check { background: var(--ocean); border-color: var(--ocean); color: #fff; }
+.mv-pick:not(.on) img { opacity: .55; }
+.mv-pick .mv-check .ic { width: 13px; height: 13px; }
+.mv-search { width: 100%; padding: .6rem .75rem; border: 1px solid var(--gray-light); border-radius: 8px; font: inherit; margin: .4rem 0 .5rem; }
+.mv-list { display: flex; flex-direction: column; gap: .35rem; max-height: 44vh; overflow-y: auto; }
+.mv-item { display: flex; align-items: center; gap: .65rem; width: 100%; text-align: left; padding: .45rem .55rem; border: 1px solid var(--gray-light); border-radius: 10px; background: #fff; cursor: pointer; font: inherit; color: var(--navy); }
+.mv-item.on { border-color: var(--ocean); background: var(--sky); box-shadow: 0 0 0 2px var(--ocean) inset; }
+.mv-thumb { width: 44px; height: 44px; flex-shrink: 0; border-radius: 8px; overflow: hidden; background: var(--sky); display: flex; align-items: center; justify-content: center; color: var(--ocean); }
+.mv-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.mv-text { display: flex; flex-direction: column; min-width: 0; }
+.mv-text strong { font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mv-text small { font-size: .75rem; color: var(--gray-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .photo-tile.loading .spin { width: 22px; height: 22px; border: 2.5px solid var(--sky-deep); border-top-color: var(--ocean); border-radius: 50%; animation: amspin .8s linear infinite; }
 @keyframes amspin { to { transform: rotate(360deg); } }
 .photo-empty { grid-column: 1 / -1; font-size: .82rem; color: var(--gray-mid); background: var(--off-white); border: 1px dashed var(--sky-deep); border-radius: 10px; padding: 1rem; text-align: center; }

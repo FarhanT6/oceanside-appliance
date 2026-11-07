@@ -196,6 +196,11 @@ function openProductEditor(id) {
           <label class="af"><span class="af-label">MSRP / retail ($)</span><input id="pe-msrp" type="number" min="0" value="${esc(p.msrp || '')}" placeholder="Shows savings" /></label>
           <label class="af"><span class="af-label">Competitor price ($)</span><input id="pe-ref" type="number" min="0" value="${esc(p.refPrice || '')}" placeholder="e.g. Lowe's price" /></label>
           <div class="af span2" id="peRange">${p.priceResearch ? priceRangeBox(p.priceResearch) : `<div class="range-box empty"><span>No price research yet${p.priceResearchNote ? ' — ' + esc(p.priceResearchNote) : ' — it runs automatically, or tap “Research the price online”.'}</span></div>`}</div>
+          <div class="af span2 price-agent" id="peByModelBox">
+            <button type="button" class="ai-btn" id="peByModel">${ic('refresh')}<span>Update details &amp; price from this model #</span></button>
+            <span class="hint">Wrong model read from the photo? Type the right one above, then tap this — it looks the model up online and redoes the name, description, specs and price research</span>
+            <div class="ai-note" id="peByModelOut" hidden></div>
+          </div>
           <div class="af span2 price-agent" id="pePrice">
             <button type="button" class="ai-btn" id="pePriceBtn">${ic('search')}<span>Research the price online</span></button>
             <span class="hint">Searches the web for new &amp; used prices of this model (about 10–30¢)</span>
@@ -223,6 +228,7 @@ function openProductEditor(id) {
         ${i === 0 ? '<span class="cover">Cover</span>' : ''}
         <div class="tile-actions">
           <button type="button" data-remove="${i}" aria-label="Remove photo">${ic('x')}</button>
+          <button type="button" data-moveto="${i}" title="Move to another item" aria-label="Move to another item">${ic('arrow-right')}</button>
           <button type="button" data-toweb="${i}" title="Also use this photo on the website" aria-label="Use on website">${ic('store')}</button>
         </div>
       </div>`).join('') + (uploading ? Array.from({ length: uploading }, () => '<div class="photo-tile loading"><span class="spin"></span></div>').join('') : '')
@@ -296,11 +302,75 @@ function openProductEditor(id) {
   });
 
   grid.addEventListener('click', e => {
+    const mt = e.target.closest('[data-moveto]');
+    if (mt) {
+      if (uploading) return showAdminToast('⚠️ Wait for the photos to finish uploading');
+      return openMovePhotos({ photos, start: +mt.dataset.moveto, fromId: existing?.id, category: m.$('#pe-category').value, onMove: movePhotos });
+    }
     const tw = e.target.closest('[data-toweb]');
     if (tw) { const u = photos[+tw.dataset.toweb]; if (!web.includes(u)) { web.push(u); renderWeb(); showAdminToast('✅ Added to website images'); } return; }
     const rm = e.target.closest('[data-remove]');
     if (rm) { photos.splice(+rm.dataset.remove, 1); renderPhotos(); }
   });
+
+  // Move photos to another item (or split them off into a new draft). Saved straight away
+  // for both items, so the photos are never in two places or lost if this window is cancelled.
+  async function movePhotos(urls, targetId) {
+    const inv = getStore('inventory');
+    const movedWeb = web.filter(u => urls.includes(u));
+    const records = [];
+    let target, label;
+    if (targetId) {
+      target = inv.find(x => x.id === targetId);
+      if (!target) return showAdminToast('⚠️ That item was removed — nothing moved');
+      const tPhotos = String(target.internalPhotos || '').split(/[\s,]+/).filter(Boolean);
+      const send = { id: target.id, internalPhotos: [...tPhotos, ...urls.filter(u => !tPhotos.includes(u))].join(', ') };
+      if (movedWeb.length) {
+        const tWeb = imagesOf(target);
+        send.imageUrl = [...tWeb, ...movedWeb.filter(u => !tWeb.includes(u))].join(', ');
+      }
+      records.push(send);
+      label = target.name || 'the other item';
+    } else {
+      target = {
+        id: 'PROD-' + Date.now(), createdAt: new Date().toISOString(),
+        name: 'Split-off item — needs details', brand: '', model: '', category: m.$('#pe-category').value || '',
+        condition: m.$('#pe-condition').value || 'Used - Good', price: 0, msrp: 0, refPrice: 0, stock: 1, desc: '', specs: {},
+        imageUrl: movedWeb.join(', '), internalPhotos: urls.join(', '), storageLocation: m.$('#pe-location').value.trim(), draft: true,
+      };
+      records.push(Object.assign({}, target));
+      label = 'a new draft';
+    }
+    photos = photos.filter(u => !urls.includes(u));
+    web = web.filter(u => !urls.includes(u));
+    if (existing) {
+      const cur = { id: existing.id, internalPhotos: photos.join(', ') };
+      if (movedWeb.length) cur.imageUrl = web.join(', ');
+      records.unshift(cur);
+      // These are saved now, so Save changes shouldn't send them again
+      opened.internalPhotos = cur.internalPhotos;
+      if (movedWeb.length) opened.imageUrl = cur.imageUrl;
+    }
+    renderPhotos(); renderWeb();
+    const ok = await saveRemote('inventory', records, 'Move photos');
+    if (!ok) {
+      // Put them back so nothing goes missing
+      photos.push(...urls); web.push(...movedWeb);
+      if (existing) { opened.internalPhotos = photos.join(', '); opened.imageUrl = web.join(', '); }
+      renderPhotos(); renderWeb();
+      return showAdminToast('⚠️ Not moved — check your connection and try again');
+    }
+    const inv2 = getStore('inventory');
+    records.forEach(r => {
+      const rec = inv2.find(x => x.id === r.id);
+      if (rec) Object.assign(rec, r); else inv2.push(Object.assign({}, r));
+    });
+    setStore('inventory', inv2);
+    syncStorefront(); renderInventory(); renderDashboard();
+    const n = urls.length;
+    showAdminToast(targetId ? `✅ Moved ${n} photo${n > 1 ? 's' : ''} to ${label}`
+      : `✅ Moved ${n} photo${n > 1 ? 's' : ''} into a new draft — find “Split-off item” in Inventory to fill in its details`);
+  }
 
   m.$('#peFiles').addEventListener('change', async e => {
     const files = [...e.target.files];
@@ -348,6 +418,33 @@ function openProductEditor(id) {
       else showAdminToast('⚠️ ' + err.message);
     } finally {
       btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('span').textContent = 'Fill in details from photos';
+    }
+  });
+
+  // Redo the details from a corrected model number (replaces what's there), then research the price again
+  m.$('#peByModel').addEventListener('click', async () => {
+    const model = m.$('#pe-model').value.trim();
+    if (!model) { m.$('#pe-model').focus(); return showAdminToast('⚠️ Type the correct model number first'); }
+    const hasText = ['#pe-name', '#pe-desc', '#pe-specs'].some(sel => m.$(sel).value.trim());
+    if (hasText && !confirm(`Replace the name, brand, type, description and specs with the details for model ${model}? Nothing is saved until you tap Save.`)) return;
+    const btn = m.$('#peByModel'), note = m.$('#peByModelOut');
+    btn.disabled = true; btn.classList.add('busy'); btn.querySelector('span').textContent = `Looking up ${model}… (up to a minute)`;
+    try {
+      const hints = { brand: m.$('#pe-brand').value, model, name: m.$('#pe-name').value, category: m.$('#pe-category').value };
+      const { suggestion: s } = await apiPost('admin_ai_product', { images: [...photos, ...web].slice(0, 4), hints, byModel: true });
+      const set = (sel, val) => { if (!val) return; const el = m.$(sel); el.value = val; el.classList.add('ai-filled'); };
+      set('#pe-name', s.name); set('#pe-brand', s.brand); set('#pe-desc', s.description);
+      if (s.category) set('#pe-category', s.category);
+      if (Array.isArray(s.specs) && s.specs.length) set('#pe-specs', s.specs.filter(x => x.label && x.value).map(x => `${x.label}: ${x.value}`).join('\n'));
+      note.hidden = false;
+      note.innerHTML = `${ic('sparkles')}<span><strong>Updated the highlighted fields for model ${esc(model)}.</strong> Double-check before saving${s.checkBeforeSaving ? ': ' + esc(s.checkBeforeSaving) : '.'}</span>`;
+      note.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      m.$('#pePriceBtn').click(); // fresh price research for the right model
+    } catch (err) {
+      if (err.code === 'unauthorized') handleApiError(err, 'AI');
+      else showAdminToast('⚠️ ' + err.message);
+    } finally {
+      btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('span').textContent = 'Update details & price from this model #';
     }
   });
 
@@ -476,6 +573,76 @@ function openProductEditor(id) {
     m.close();
     showAdminToast(existing ? `✅ ${name} saved` : `✅ ${name} added`);
   });
+}
+
+// ─── Move photos picker: choose which photos, and which item they belong to ───
+function openMovePhotos({ photos, start, fromId, onMove }) {
+  const chosen = new Set([photos[start]]);
+  let target = null; // item id, or '' for a new draft
+  const others = getStore('inventory').filter(p => p.id !== fromId)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const cover = p => String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean)[0] || imagesOf(p)[0] || '';
+
+  const m = openAdminModal({
+    title: 'Move photos to another item',
+    body: `
+      <div class="af-label">Photos to move <span class="hint">tap to select</span></div>
+      <div class="photo-grid mv-photos" id="mvPhotos"></div>
+      <div class="af-label mv-to">Move to</div>
+      <input type="search" id="mvSearch" class="mv-search" placeholder="Search name, brand, model # or location" />
+      <div class="mv-list" id="mvList" role="listbox" aria-label="Items"></div>`,
+    footer: `<span class="hint" id="mvSummary"></span><span style="flex:1"></span>
+      <button type="button" class="card-btn" data-am-close>Cancel</button>
+      <button type="button" class="card-btn primary" id="mvGo" disabled>Move</button>`,
+  });
+
+  function renderPhotos() {
+    m.$('#mvPhotos').innerHTML = photos.map((u, i) => `
+      <button type="button" class="photo-tile mv-pick ${chosen.has(u) ? 'on' : ''}" data-i="${i}" aria-pressed="${chosen.has(u)}">
+        <img src="${esc(u)}" alt="" /><span class="mv-check">${ic('check')}</span>
+      </button>`).join('');
+    update();
+  }
+  function renderList() {
+    const q = m.$('#mvSearch').value.trim();
+    const list = q ? others.filter(p => matches(p, q, ['name', 'brand', 'model', 'storageLocation', 'category'])) : others;
+    m.$('#mvList').innerHTML = `
+      <button type="button" class="mv-item ${target === '' ? 'on' : ''}" data-id="" role="option" aria-selected="${target === ''}">
+        <span class="mv-thumb new">${ic('plus')}</span>
+        <span class="mv-text"><strong>A new item</strong><small>Split these photos off into their own draft</small></span>
+      </button>` +
+      list.slice(0, 60).map(p => `
+      <button type="button" class="mv-item ${target === p.id ? 'on' : ''}" data-id="${esc(p.id)}" role="option" aria-selected="${target === p.id}">
+        <span class="mv-thumb">${cover(p) ? `<img src="${esc(cover(p))}" alt="" loading="lazy" />` : ic('camera')}</span>
+        <span class="mv-text"><strong>${esc(p.name || 'Untitled')}</strong>
+          <small>${esc([p.brand, p.model && '#' + p.model, p.storageLocation, p.draft ? 'Draft' : ''].filter(Boolean).join(' · '))}</small></span>
+      </button>`).join('') +
+      (list.length > 60 ? `<p class="hint">Showing 60 of ${list.length} — search to narrow it down.</p>` : '') +
+      (q && !list.length ? '<p class="hint">No items match that search.</p>' : '');
+    update();
+  }
+  function update() {
+    const n = chosen.size;
+    m.$('#mvSummary').textContent = `${n} photo${n === 1 ? '' : 's'} selected`;
+    m.$('#mvGo').disabled = !n || target === null;
+  }
+  m.$('#mvPhotos').addEventListener('click', e => {
+    const t = e.target.closest('[data-i]'); if (!t) return;
+    const u = photos[+t.dataset.i];
+    chosen.has(u) ? chosen.delete(u) : chosen.add(u);
+    renderPhotos();
+  });
+  m.$('#mvList').addEventListener('click', e => {
+    const t = e.target.closest('[data-id]'); if (!t) return;
+    target = t.dataset.id; renderList();
+  });
+  m.$('#mvSearch').addEventListener('input', renderList);
+  m.$('#mvGo').addEventListener('click', () => {
+    const urls = photos.filter(u => chosen.has(u));
+    m.close();
+    onMove(urls, target);
+  });
+  renderPhotos(); renderList();
 }
 
 // ─── Marketplace listing (OfferUp / Facebook / Craigslist) ───
