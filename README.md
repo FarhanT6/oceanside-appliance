@@ -100,6 +100,8 @@ To change the key later, run `setupAdminKey()` again and paste the new key into 
 The AI runs inside Apps Script, so the API key never appears in the website code.
 
 - **Fill in details from photos** (product editor): reads the photos — including the model sticker — and drafts the name, brand, model, category, description and specs. It never overwrites fields you've already typed.
+- **Update details & price from this model #** (product editor): when the photo was misread, type the correct model number and tap this. It looks that exact model up online, replaces the name, brand, type, description and specs (highlighted, nothing saved until you tap Save), and runs a fresh price research.
+- **Move photos to another item** (product editor → the → button on an inventory photo): pick one or more photos and the item they belong to, or split them off into a new draft. Both items are saved straight away; website images move with their photo.
 - **Repair diagnosis**: likely causes, parts to bring, questions to ask, an urgency level (with a safety warning when needed) and a ready-to-send text message. New requests are diagnosed automatically and emailed to you; you can also run it from any repair.
 - **Polish with AI** (marketplace listing): rewrites the listing using only the product's facts.
 - **Pricing research agent** (product editor → "Research the price online"): searches the web for this model's new retail price and used/sold prices, then suggests an asking price with a range, confidence level and the links it used. One click fills in the price or MSRP. About 10–30¢ per lookup.

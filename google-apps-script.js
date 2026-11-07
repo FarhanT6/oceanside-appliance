@@ -818,13 +818,38 @@ function imageBlock(url) {
   return { type: 'image', source: { type: 'base64', media_type: type, data: Utilities.base64Encode(bytes) } };
 }
 
+// Look up an exact model number on the web and return what was found, as plain notes
+function lookupModelFacts(brand, model) {
+  const messages = [{ role: 'user', content:
+    'Look up this exact appliance model number and report its product details.\n' +
+    'Model number: ' + model + '\n' + (brand ? 'Brand we have on file (may be wrong — the model number is what counts): ' + brand + '\n' : '') + '\n' +
+    'Prefer the manufacturer\'s page, then major retailers or spec sites (Home Depot, Lowe\'s, Best Buy, AJ Madison, Abt). ' +
+    'Report: the brand, the product type, the official product name, size/capacity, width, fuel type (gas/electric) if relevant, color/finish, ' +
+    'key features, and the year range it was sold if shown. Make sure each fact is for this exact model number, not a similar one. ' +
+    'If you could not find this exact model, say so plainly. Plain notes only — no prices.' }];
+  const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 4 }];
+  let text = '';
+  for (let i = 0; i < 4; i++) {
+    const json = claudeRequest({ max_tokens: 8000, thinking: { type: 'adaptive' }, output_config: { effort: 'low' }, tools: tools, messages: messages,
+      system: 'You look up appliance specifications by model number for an appliance store. Report only facts you found for the exact model.' });
+    (json.content || []).forEach(b => { if (b.type === 'text') text += b.text + '\n'; });
+    if (json.stop_reason !== 'pause_turn') break;
+    messages.push({ role: 'assistant', content: json.content });
+  }
+  return text.trim().slice(0, 5000);
+}
+
 function aiProductFromPhotos(d) {
-  const urls = (Array.isArray(d.images) ? d.images : []).filter(u => /^https?:\/\//i.test(String(u))).slice(0, 4);
-  if (!urls.length) return fail('Add at least one photo first.');
-  const images = urls.map(imageBlock).filter(Boolean);
-  if (!images.length) return fail('Could not open those photos. Try re-uploading them.');
   const hints = d.hints || {};
-  const known = ['name', 'brand', 'model', 'category'].filter(k => hints[k]).map(k => `${k}: ${clean(hints[k], 120)}`).join('\n');
+  const byModel = !!d.byModel && !!clean(hints.model, 60);
+  const urls = (Array.isArray(d.images) ? d.images : []).filter(u => /^https?:\/\//i.test(String(u))).slice(0, 4);
+  if (!urls.length && !byModel) return fail('Add at least one photo first.');
+  const images = urls.map(imageBlock).filter(Boolean);
+  if (!images.length && !byModel) return fail('Could not open those photos. Try re-uploading them.');
+  // "Update from this model #": staff typed the right model number, so trust it and look it up online
+  const facts = byModel ? lookupModelFacts(clean(hints.brand, 60), clean(hints.model, 60)) : '';
+  const known = ['name', 'brand', 'model', 'category'].filter(k => hints[k] && !(byModel && k !== 'model'))
+    .map(k => `${k}: ${clean(hints[k], 120)}`).join('\n');
   const schema = strictObject({
     name: { type: 'string', description: 'Short listing name, e.g. "Samsung 28 cu ft French Door Refrigerator". Empty if unclear.' },
     brand: { type: 'string' },
@@ -841,9 +866,15 @@ function aiProductFromPhotos(d) {
     system: 'You help staff at Oceanside Appliance, a used and new appliance store, list appliances for sale. ' +
       'Look at the photos (which may include the rating plate / model sticker) and fill in the product details. ' +
       'Only state what you can see or reliably infer from a visible model number. Never invent features, capacities or prices. ' +
-      'Leave a field empty when you are not sure, and mention it in checkBeforeSaving. Use US units.',
-    content: images.concat([{ type: 'text', text: 'Fill in the listing details for this appliance.' + (known ? '\n\nStaff already entered:\n' + known : '') }])
+      'Leave a field empty when you are not sure, and mention it in checkBeforeSaving. Use US units.' +
+      (byModel ? ' The staff member has confirmed the model number. Treat it as correct even if a photo seems to show something else, ' +
+        'and base the name, brand, category, description and specs on that model using the web lookup notes. ' +
+        'Return the model number exactly as the staff entered it. If the lookup could not find this exact model, say so in checkBeforeSaving.' : ''),
+    content: images.concat([{ type: 'text', text: 'Fill in the listing details for this appliance.' +
+      (known ? '\n\nStaff already entered' + (byModel ? ' (model number confirmed)' : '') + ':\n' + known : '') +
+      (byModel ? '\n\n<web_lookup_notes>\n' + (facts || 'Nothing found online for this model number.') + '\n</web_lookup_notes>' : '') }])
   });
+  if (byModel) result.model = clean(hints.model, 60);
   return { success: true, suggestion: result };
 }
 
