@@ -650,6 +650,9 @@
 .comps li { display: flex; gap: .5rem; align-items: baseline; }
 .comps .kind { flex-shrink: 0; font-size: .64rem; font-weight: 700; text-transform: uppercase; background: var(--off-white); border: 1px solid var(--gray-light); border-radius: 4px; padding: .05rem .35rem; color: var(--gray-dark); }
 .comps .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.specs-found .t { flex: 0 0 38%; white-space: normal; }
+.specs-found li > span:last-child { flex: 1; }
+.price-card .contact-btns { flex-wrap: wrap; }
 .btn-sync.ghost { background: var(--white); color: var(--navy); border: 1px solid var(--gray-light); margin-right: .25rem; }
 .btn-sync.ghost:hover { border-color: var(--ocean); color: var(--ocean); box-shadow: none; }
 @media (max-width: 760px) { .hide-sm { display: none; } }

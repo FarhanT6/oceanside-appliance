@@ -818,14 +818,24 @@ function imageBlock(url) {
   return { type: 'image', source: { type: 'base64', media_type: type, data: Utilities.base64Encode(bytes) } };
 }
 
+// What a good spec list looks like (same labels everywhere, so the website reads consistently)
+const SPEC_GUIDE = 'Use these labels when known, in this order: "Dimensions" (width × height × depth in inches, e.g. 29.75" W × 28.75" H × 24.5" D), ' +
+  '"Cutout size" (built-ins only), "Capacity" (cu ft, or place settings for dishwashers), "Fuel / power" (gas, electric, voltage/amps), ' +
+  '"Installation" (freestanding, slide-in, built-in, front-load, top-load, over-the-range…), "Color / finish", "Weight" (lbs), ' +
+  'then up to 4 "Feature" items (e.g. "Convection", "Ice maker", "Steam clean"). Only include values you are sure apply to this exact model.';
+function specsSchema() {
+  return { type: 'array', description: 'Product specifications. ' + SPEC_GUIDE,
+           items: strictObject({ label: { type: 'string' }, value: { type: 'string' } }) };
+}
+
 // Look up an exact model number on the web and return what was found, as plain notes
 function lookupModelFacts(brand, model) {
   const messages = [{ role: 'user', content:
     'Look up this exact appliance model number and report its product details.\n' +
     'Model number: ' + model + '\n' + (brand ? 'Brand we have on file (may be wrong — the model number is what counts): ' + brand + '\n' : '') + '\n' +
     'Prefer the manufacturer\'s page, then major retailers or spec sites (Home Depot, Lowe\'s, Best Buy, AJ Madison, Abt). ' +
-    'Report: the brand, the product type, the official product name, size/capacity, width, fuel type (gas/electric) if relevant, color/finish, ' +
-    'key features, and the year range it was sold if shown. Make sure each fact is for this exact model number, not a similar one. ' +
+    'Report: the brand, the product type, the official product name, the exact dimensions (width × height × depth in inches; cutout size for built-ins), ' +
+    'capacity, fuel/power type and voltage, installation type, color/finish, weight, key features, and the year range it was sold if shown. Make sure each fact is for this exact model number, not a similar one. ' +
     'If you could not find this exact model, say so plainly. Plain notes only — no prices.' }];
   const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 4 }];
   let text = '';
@@ -857,7 +867,7 @@ function aiProductFromPhotos(d) {
     category: { type: 'string', enum: APPLIANCE_CATEGORIES },
     conditionGuess: { type: 'string', enum: ['New', 'New (Open Box)', 'Used - Excellent', 'Used - Good', 'Used - Fair', 'For Parts', 'Unknown'] },
     description: { type: 'string', description: '2-4 plain sentences for customers: type, size/capacity, finish, notable features, visible cosmetic marks.' },
-    specs: { type: 'array', items: strictObject({ label: { type: 'string' }, value: { type: 'string' } }) },
+    specs: specsSchema(),
     checkBeforeSaving: { type: 'string', description: 'Anything uncertain the staff member should verify, or empty.' }
   });
   const result = callClaude({
@@ -1212,7 +1222,9 @@ function aiPriceResearch(d) {
     `Our unit's condition: ${condition}\n${desc ? 'Notes: ' + desc + '\n' : ''}\n` +
     `Find: (1) the original MSRP / current new retail price for this exact model (or its closest current equivalent — say so), ` +
     `(2) prices of the same or very similar model sold or listed used/refurbished (eBay sold, OfferUp, Facebook Marketplace, Craigslist, used appliance stores), ` +
-    `ideally in Southern California. Then recommend a fair asking price for our unit given its condition.`;
+    `ideally in Southern California. Then recommend a fair asking price for our unit given its condition. ` +
+    `While you are on the product pages, also note its specifications: exact dimensions (width × height × depth in inches; cutout size for built-ins), ` +
+    `capacity, fuel/power type and voltage, installation type, color/finish and weight.`;
   const messages = [{ role: 'user', content: userText }];
   const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5,
                    user_location: { type: 'approximate', city: 'Oceanside', region: 'California', country: 'US', timezone: 'America/Los_Angeles' } }];
@@ -1249,9 +1261,11 @@ function aiPriceResearch(d) {
         title: { type: 'string' }, price: { type: 'number' },
         kind: { type: 'string', enum: ['new retail', 'used listing', 'used sold', 'refurbished'] },
         url: { type: 'string', description: 'Must be copied exactly from the provided source list, or empty.' }
-      }) }
+      }) },
+      specs: specsSchema()
     }),
     system: 'Turn pricing research notes into structured data. Use only numbers stated in the notes. ' +
+      'Fill specs only from what the notes say about this exact model; leave it empty otherwise. ' +
       'Only use URLs that appear in the provided source list. Do not invent comparables.',
     content: [{ type: 'text', text:
       '<research_notes>\n' + researchText.slice(0, 20000) + '\n</research_notes>\n\n' +
@@ -1264,13 +1278,26 @@ function aiPriceResearch(d) {
     .filter(c => c.price > 0 && (!c.url || allowed[c.url]))
     .slice(0, 8)
     .map(c => ({ title: c.title, price: c.price, kind: c.kind, url: c.url || '' }));
+  result.specs = (result.specs || []).filter(x => x && clean(x.label, 40) && clean(x.value, 120)).slice(0, 12)
+    .map(x => ({ label: clean(x.label, 40), value: clean(x.value, 120) }));
   return { success: true, pricing: result, at: new Date().toISOString() };
+}
+
+// Specs found online are added only where the item doesn't already have that label. Returns null if nothing new.
+function addMissingSpecs(current, found) {
+  const cur = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+  const have = {}; Object.keys(cur).forEach(k => { have[k.toLowerCase()] = true; });
+  const out = Object.assign({}, cur);
+  let added = 0;
+  (found || []).forEach(x => { if (x && x.label && x.value && !have[x.label.toLowerCase()]) { out[x.label] = x.value; have[x.label.toLowerCase()] = true; added++; } });
+  return added ? out : null;
 }
 
 // Research one product's price and save it (range for reference; fills the price only if none is set)
 function autoPriceFor(p) {
   const update = { id: p.id, priceResearchAt: new Date().toISOString(), priceResearchTries: (Number(p.priceResearchTries) || 0) + 1 };
   markAttempt(p.id, { priceResearchAt: update.priceResearchAt, priceResearchTries: update.priceResearchTries });
+  let foundSpecs = [];
   try {
     const res = aiPriceResearch({ product: p });
     if (!res.success) throw new Error(res.error);
@@ -1279,10 +1306,11 @@ function autoPriceFor(p) {
       // Keep everything it found, so staff can see the reasoning and the listings later
       update.priceResearch = { suggested: Math.round(r.suggestedPrice) || 0, low: Math.round(r.rangeLow) || 0, high: Math.round(r.rangeHigh) || 0,
         msrp: Math.round(r.msrp) || 0, msrpNote: clean(r.msrpNote, 300), confidence: r.confidence || '',
-        reasoning: clean(r.reasoning, 800), comparables: (r.comparables || []).slice(0, 8), at: res.at };
+        reasoning: clean(r.reasoning, 800), comparables: (r.comparables || []).slice(0, 8), specs: r.specs || [], at: res.at };
       // Fill in a price only for drafts (never changes what customers see); MSRP stays in the
       // research box so the website never shows an unverified "new retail" comparison
       if (p.draft && r.suggestedPrice) update.price = Math.round(r.suggestedPrice);
+      foundSpecs = r.specs || [];
       update.priceResearchNote = '';
     } else {
       update.priceResearchNote = 'Not enough price data found online.';
@@ -1290,7 +1318,14 @@ function autoPriceFor(p) {
   } catch (err) {
     update.priceResearchNote = String(err && err.message || err).slice(0, 200);
   }
-  withLock(() => upsertRecords('inventory', [update], 'price research', { onlyExisting: true, keepIfSet: ['price'] }));
+  withLock(() => {
+    if (foundSpecs.length) { // compare with the item as it is now, in case specs were edited during the search
+      const now = readCollection('inventory').find(x => x.id === p.id);
+      const merged = now && addMissingSpecs(now.specs, foundSpecs);
+      if (merged) update.specs = merged;
+    }
+    upsertRecords('inventory', [update], 'price research', { onlyExisting: true, keepIfSet: ['price'] });
+  });
   return update;
 }
 
