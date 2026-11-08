@@ -224,7 +224,7 @@ function openProductEditor(id) {
   function renderPhotos() {
     grid.innerHTML = photos.map((u, i) => `
       <div class="photo-tile">
-        <img src="${esc(u)}" alt="" />
+        <button type="button" class="zoom" data-zoom="${i}" aria-label="View photo ${i + 1} larger"><img src="${esc(u)}" alt="" /></button>
         ${i === 0 ? '<span class="cover">Cover</span>' : ''}
         <div class="tile-actions">
           <button type="button" data-remove="${i}" aria-label="Remove photo">${ic('x')}</button>
@@ -238,7 +238,7 @@ function openProductEditor(id) {
   function renderWeb() {
     webGrid.innerHTML = web.map((u, i) => `
       <div class="photo-tile">
-        <img src="${esc(u)}" alt="" />
+        <button type="button" class="zoom" data-zoom="${i}" aria-label="View photo ${i + 1} larger"><img src="${esc(u)}" alt="" /></button>
         ${i === 0 ? '<span class="cover">Cover</span>' : ''}
         <div class="tile-actions">
           <button type="button" data-move="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move left">${ic('chevron-left')}</button>
@@ -250,6 +250,8 @@ function openProductEditor(id) {
   renderPhotos();
   renderWeb();
   webGrid.addEventListener('click', e => {
+    const big = e.target.closest('[data-zoom]');
+    if (big) return openLightbox(web, +big.dataset.zoom);
     const mv = e.target.closest('[data-move]');
     if (mv) { const i = +mv.dataset.move, j = i + +mv.dataset.dir; [web[i], web[j]] = [web[j], web[i]]; return renderWeb(); }
     const rm = e.target.closest('[data-remove]');
@@ -302,6 +304,8 @@ function openProductEditor(id) {
   });
 
   grid.addEventListener('click', e => {
+    const big = e.target.closest('[data-zoom]');
+    if (big) return openLightbox(photos, +big.dataset.zoom);
     const mt = e.target.closest('[data-moveto]');
     if (mt) {
       if (uploading) return showAdminToast('⚠️ Wait for the photos to finish uploading');
@@ -573,6 +577,54 @@ function openProductEditor(id) {
     m.close();
     showAdminToast(existing ? `✅ ${name} saved` : `✅ ${name} added`);
   });
+}
+
+// ─── Photo viewer: tap a photo to see it full size ───
+function openLightbox(urls, start = 0) {
+  if (!urls.length) return;
+  let i = Math.max(0, Math.min(start, urls.length - 1));
+  const lb = document.createElement('div');
+  lb.className = 'lb';
+  lb.setAttribute('role', 'dialog'); lb.setAttribute('aria-modal', 'true'); lb.setAttribute('aria-label', 'Photo');
+  lb.innerHTML = `
+    <img class="lb-img" alt="" />
+    <button type="button" class="lb-btn lb-x" aria-label="Close">${ic('x')}</button>
+    ${urls.length > 1 ? `<button type="button" class="lb-btn lb-prev" aria-label="Previous photo">${ic('chevron-left')}</button>
+    <button type="button" class="lb-btn lb-next" aria-label="Next photo">${ic('chevron-right')}</button>
+    <div class="lb-count"></div>` : ''}
+    <a class="lb-open" target="_blank" rel="noopener">${ic('external')} Open original</a>`;
+  const img = lb.querySelector('.lb-img');
+  function show() {
+    img.src = urls[i];
+    lb.querySelector('.lb-open').href = urls[i];
+    const c = lb.querySelector('.lb-count'); if (c) c.textContent = `${i + 1} / ${urls.length}`;
+  }
+  const go = d => { if (urls.length > 1) { i = (i + d + urls.length) % urls.length; show(); } };
+  function close() { lb.remove(); window.removeEventListener('keydown', onKey, true); prevFocus?.focus({ preventScroll: true }); }
+  // Capture phase, so Esc closes only the photo and not the editor underneath
+  function onKey(e) {
+    if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); close(); }
+    else if (e.key === 'ArrowLeft') { e.stopImmediatePropagation(); go(-1); }
+    else if (e.key === 'ArrowRight') { e.stopImmediatePropagation(); go(1); }
+  }
+  lb.addEventListener('click', e => {
+    if (e.target.closest('.lb-prev')) return go(-1);
+    if (e.target.closest('.lb-next')) return go(1);
+    if (e.target.closest('.lb-open')) return;
+    if (e.target.closest('.lb-x') || e.target === lb) close();
+  });
+  let x0 = null;
+  lb.addEventListener('touchstart', e => { x0 = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+  lb.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1);
+  });
+  const prevFocus = document.activeElement;
+  window.addEventListener('keydown', onKey, true);
+  document.body.appendChild(lb);
+  show();
+  lb.querySelector('.lb-x').focus({ preventScroll: true });
 }
 
 // ─── Move photos picker: choose which photos, and which item they belong to ───
