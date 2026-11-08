@@ -238,6 +238,10 @@ function openBulkImport() {
       if (r.suggestedPrice && !g.edited.has('price')) g.f.price = Math.round(r.suggestedPrice);
       if (r.msrp && !g.f.msrp) g.f.msrp = Math.round(r.msrp);
       if (r.suggestedPrice || r.rangeLow) g.f.priceResearch = priceResearchFrom(r);
+      // Dimensions and other specs found while researching — added where the photo reading didn't have them
+      const specs = { ...(g.f.specs || {}) }, have = new Set(Object.keys(specs).map(k => k.toLowerCase()));
+      (r.specs || []).forEach(x => { if (x.label && x.value && !have.has(x.label.toLowerCase())) { specs[x.label] = x.value; have.add(x.label.toLowerCase()); } });
+      g.f.specs = specs;
       g.pricing = r.suggestedPrice || r.rangeLow ? 'done' : 'none';
     } catch (err) { g.pricing = 'error'; g.priceErr = err.message; }
     renderCard(g); updateFooter();

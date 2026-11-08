@@ -122,7 +122,21 @@ function priceResearchFrom(r, at) {
            reasoning: String(r.reasoning || '').slice(0, 800),
            comparables: (Array.isArray(r.comparables) ? r.comparables : []).slice(0, 8)
              .map(c => ({ title: String(c.title || '').slice(0, 160), price: Number(c.price) || 0, kind: String(c.kind || ''), url: String(c.url || '') })),
+           specs: (Array.isArray(r.specs) ? r.specs : []).slice(0, 12).map(x => ({ label: String(x.label || ''), value: String(x.value || '') })).filter(x => x.label && x.value),
            at: at || new Date().toISOString() };
+}
+// Specs text box ⇄ list. Adds found specs only where that label isn't there yet; returns how many were added.
+function specsFromText(text) {
+  return String(text || '').split('\n').map(line => { const i = line.indexOf(':'); return i > 0 ? [line.slice(0, i).trim(), line.slice(i + 1).trim()] : null; })
+    .filter(x => x && x[0] && x[1]);
+}
+function addMissingSpecsText(textarea, found) {
+  const rows = specsFromText(textarea.value);
+  const have = new Set(rows.map(([k]) => k.toLowerCase()));
+  let added = 0;
+  (found || []).forEach(x => { if (x.label && x.value && !have.has(x.label.toLowerCase())) { rows.push([x.label, x.value]); have.add(x.label.toLowerCase()); added++; } });
+  if (added) { textarea.value = rows.map(([k, v]) => `${k}: ${v}`).join('\n'); textarea.classList.add('ai-filled'); }
+  return added;
 }
 // The full research card (suggested price, MSRP, reasoning, what we found) from saved research
 function priceCardHtml(pr) {
@@ -139,10 +153,12 @@ function priceCardHtml(pr) {
       </div>
       <div class="conf" style="color:${conf[1]}">${conf[0]}${when ? `<span class="hint"> · researched ${esc(when)}</span>` : ''}</div>
       ${pr.reasoning ? `<p class="price-why">${esc(pr.reasoning)}</p>` : ''}
+      ${(pr.specs || []).length ? `<div class="af-label">Specs found online</div><ul class="comps specs-found">${pr.specs.map(x => `<li><span class="t"><strong>${esc(x.label)}</strong></span><span>${esc(x.value)}</span></li>`).join('')}</ul>` : ''}
       ${comps.length ? `<div class="af-label">What we found</div><ul class="comps">${comps.map(c => `<li><span class="kind">${esc(c.kind)}</span><span class="t">${/^https?:\/\//i.test(c.url) ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}</span><strong>${$(c.price)}</strong></li>`).join('')}</ul>` : ''}
       <div class="contact-btns">
         ${pr.suggested ? `<button type="button" class="card-btn small primary" data-use-price="${pr.suggested}">Use ${$(pr.suggested)} as our price</button>` : ''}
         ${pr.msrp ? `<button type="button" class="card-btn small" data-use-msrp="${pr.msrp}">Use ${$(pr.msrp)} as MSRP</button>` : ''}
+        ${(pr.specs || []).length ? `<button type="button" class="card-btn small" data-use-specs>Add specs &amp; dimensions</button>` : ''}
       </div>
     </div>`;
 }
@@ -493,6 +509,8 @@ function openProductEditor(id) {
       const { pricing: r, at } = await apiPost('admin_ai_price', { product });
       if (r.suggestedPrice || r.rangeLow) {
         research = priceResearchFrom(r, at);
+        const n = addMissingSpecsText(m.$('#pe-specs'), research.specs);
+        if (n) showAdminToast(`📐 Added ${n} spec${n > 1 ? 's' : ''} (dimensions etc.) — save to keep`);
         m.$('#peRange').innerHTML = priceRangeBox(research);
         if (existing) { // keep the research even if this window is closed without saving
           const all = getStore('inventory'); const rec = all.find(x => x.id === existing.id);
@@ -513,6 +531,10 @@ function openProductEditor(id) {
     const up = e.target.closest('[data-use-price]');
     if (up) { m.$('#pe-price').value = Math.round(+up.dataset.usePrice); m.$('#pe-price').classList.add('ai-filled'); showAdminToast('✅ Price filled in — save to keep it'); }
     const um = e.target.closest('[data-use-msrp]');
+    if (e.target.closest('[data-use-specs]')) {
+      const n = addMissingSpecsText(m.$('#pe-specs'), research?.specs);
+      showAdminToast(n ? `📐 Added ${n} spec${n > 1 ? 's' : ''} — save to keep` : 'Those specs are already in the list');
+    }
     if (um) { m.$('#pe-msrp').value = Math.round(+um.dataset.useMsrp); m.$('#pe-msrp').classList.add('ai-filled'); showAdminToast('✅ MSRP filled in — save to keep it'); }
   });
 
