@@ -115,9 +115,36 @@ async function uploadPhoto(file) {
 }
 
 // ─── Saved price research (staff only — never shown on the website) ───
-function priceResearchFrom(r) {
+// Everything the price research found is kept (shown again whenever the item is opened)
+function priceResearchFrom(r, at) {
   return { suggested: Math.round(r.suggestedPrice) || 0, low: Math.round(r.rangeLow) || 0, high: Math.round(r.rangeHigh) || 0,
-           msrp: Math.round(r.msrp) || 0, confidence: r.confidence || '', at: new Date().toISOString() };
+           msrp: Math.round(r.msrp) || 0, msrpNote: String(r.msrpNote || '').slice(0, 300), confidence: r.confidence || '',
+           reasoning: String(r.reasoning || '').slice(0, 800),
+           comparables: (Array.isArray(r.comparables) ? r.comparables : []).slice(0, 8)
+             .map(c => ({ title: String(c.title || '').slice(0, 160), price: Number(c.price) || 0, kind: String(c.kind || ''), url: String(c.url || '') })),
+           at: at || new Date().toISOString() };
+}
+// The full research card (suggested price, MSRP, reasoning, what we found) from saved research
+function priceCardHtml(pr) {
+  const $ = n => money2(n).replace('.00', '');
+  const conf = { high: ['High confidence', '#1e8449'], medium: ['Medium confidence', '#1a6fa8'], low: ['Low confidence — little data found', '#b9770e'] }[pr.confidence] || ['', '#555'];
+  const when = pr.at ? new Date(pr.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const comps = pr.comparables || [];
+  return `
+    <div class="price-card">
+      <div class="price-top">
+        <div><div class="hint">Suggested price</div><div class="price-big">${pr.suggested ? $(pr.suggested) : '—'}</div>
+          ${pr.low && pr.high ? `<div class="hint">Typical range ${$(pr.low)}–${$(pr.high)}</div>` : ''}</div>
+        <div><div class="hint">MSRP / new</div><div class="price-mid">${pr.msrp ? $(pr.msrp) : '—'}</div>${pr.msrpNote ? `<div class="hint">${esc(pr.msrpNote)}</div>` : ''}</div>
+      </div>
+      <div class="conf" style="color:${conf[1]}">${conf[0]}${when ? `<span class="hint"> · researched ${esc(when)}</span>` : ''}</div>
+      ${pr.reasoning ? `<p class="price-why">${esc(pr.reasoning)}</p>` : ''}
+      ${comps.length ? `<div class="af-label">What we found</div><ul class="comps">${comps.map(c => `<li><span class="kind">${esc(c.kind)}</span><span class="t">${/^https?:\/\//i.test(c.url) ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}</span><strong>${$(c.price)}</strong></li>`).join('')}</ul>` : ''}
+      <div class="contact-btns">
+        ${pr.suggested ? `<button type="button" class="card-btn small primary" data-use-price="${pr.suggested}">Use ${$(pr.suggested)} as our price</button>` : ''}
+        ${pr.msrp ? `<button type="button" class="card-btn small" data-use-msrp="${pr.msrp}">Use ${$(pr.msrp)} as MSRP</button>` : ''}
+      </div>
+    </div>`;
 }
 function priceRangeBox(pr) {
   const $ = n => '$' + Number(n).toLocaleString('en-US');
@@ -463,9 +490,9 @@ function openProductEditor(id) {
     btn.querySelector('span').textContent = 'Searching prices… (up to a minute)';
     out.innerHTML = '';
     try {
-      const { pricing: r } = await apiPost('admin_ai_price', { product });
+      const { pricing: r, at } = await apiPost('admin_ai_price', { product });
       if (r.suggestedPrice || r.rangeLow) {
-        research = priceResearchFrom(r);
+        research = priceResearchFrom(r, at);
         m.$('#peRange').innerHTML = priceRangeBox(research);
         if (existing) { // keep the research even if this window is closed without saving
           const all = getStore('inventory'); const rec = all.find(x => x.id === existing.id);
@@ -473,28 +500,15 @@ function openProductEditor(id) {
           saveRemote('inventory', [{ id: existing.id, priceResearch: research }], 'price research');
         }
       }
-      const conf = { high: ['High confidence', '#1e8449'], medium: ['Medium confidence', '#1a6fa8'], low: ['Low confidence — little data found', '#b9770e'] }[r.confidence] || ['', '#555'];
-      out.innerHTML = `
-        <div class="price-card">
-          <div class="price-top">
-            <div><div class="hint">Suggested price</div><div class="price-big">${r.suggestedPrice ? money2(r.suggestedPrice).replace('.00', '') : '—'}</div>
-              ${r.rangeLow && r.rangeHigh ? `<div class="hint">Typical range ${money2(r.rangeLow).replace('.00','')}–${money2(r.rangeHigh).replace('.00','')}</div>` : ''}</div>
-            <div><div class="hint">MSRP / new</div><div class="price-mid">${r.msrp ? money2(r.msrp).replace('.00', '') : '—'}</div>${r.msrpNote ? `<div class="hint">${esc(r.msrpNote)}</div>` : ''}</div>
-          </div>
-          <div class="conf" style="color:${conf[1]}">${conf[0]}</div>
-          <p class="price-why">${esc(r.reasoning)}</p>
-          ${(r.comparables || []).length ? `<div class="af-label">What we found</div><ul class="comps">${r.comparables.map(c => `<li><span class="kind">${esc(c.kind)}</span><span class="t">${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}</span><strong>${money2(c.price).replace('.00', '')}</strong></li>`).join('')}</ul>` : ''}
-          <div class="contact-btns">
-            ${r.suggestedPrice ? `<button type="button" class="card-btn small primary" data-use-price="${r.suggestedPrice}">Use ${money2(r.suggestedPrice).replace('.00','')} as our price</button>` : ''}
-            ${r.msrp ? `<button type="button" class="card-btn small" data-use-msrp="${r.msrp}">Use ${money2(r.msrp).replace('.00','')} as MSRP</button>` : ''}
-          </div>
-        </div>`;
+      out.innerHTML = research && (r.suggestedPrice || r.rangeLow) ? priceCardHtml(research)
+        : `<div class="ai-err">Not enough price data found online for this model.${r.reasoning ? ' ' + esc(r.reasoning) : ''}</div>`;
     } catch (err) {
       if (err.code === 'unauthorized') handleApiError(err, 'AI'); else out.innerHTML = `<div class="ai-err">⚠️ ${esc(err.message)}</div>`;
     } finally {
       btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('span').textContent = 'Research the price online';
     }
   });
+  if (research && (research.reasoning || (research.comparables || []).length)) m.$('#pePriceOut').innerHTML = priceCardHtml(research);
   m.$('#pePriceOut').addEventListener('click', e => {
     const up = e.target.closest('[data-use-price]');
     if (up) { m.$('#pe-price').value = Math.round(+up.dataset.usePrice); m.$('#pe-price').classList.add('ai-filled'); showAdminToast('✅ Price filled in — save to keep it'); }

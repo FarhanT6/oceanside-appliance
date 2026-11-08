@@ -1276,8 +1276,10 @@ function autoPriceFor(p) {
     if (!res.success) throw new Error(res.error);
     const r = res.pricing;
     if (r.suggestedPrice || r.rangeLow) {
+      // Keep everything it found, so staff can see the reasoning and the listings later
       update.priceResearch = { suggested: Math.round(r.suggestedPrice) || 0, low: Math.round(r.rangeLow) || 0, high: Math.round(r.rangeHigh) || 0,
-        msrp: Math.round(r.msrp) || 0, confidence: r.confidence || '', at: res.at };
+        msrp: Math.round(r.msrp) || 0, msrpNote: clean(r.msrpNote, 300), confidence: r.confidence || '',
+        reasoning: clean(r.reasoning, 800), comparables: (r.comparables || []).slice(0, 8), at: res.at };
       // Fill in a price only for drafts (never changes what customers see); MSRP stays in the
       // research box so the website never shows an unverified "new retail" comparison
       if (p.draft && r.suggestedPrice) update.price = Math.round(r.suggestedPrice);
