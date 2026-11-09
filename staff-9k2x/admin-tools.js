@@ -199,7 +199,7 @@ function openProductEditor(id) {
     body: `
       <div class="pe-layout">
         <div class="pe-photos">
-          <div class="pe-sec">
+          <div class="pe-sec" id="peWebSec">
             <div class="af-label">Website images <span class="hint">what customers see · first is the cover</span></div>
             ${p.imagesAutoPicked ? `<div class="ai-note">${ic('sparkles')}<span>These were picked automatically — check they match, then save.</span></div>` : ''}
             <div class="photo-grid" id="peWeb"></div>
@@ -213,10 +213,10 @@ function openProductEditor(id) {
               <input type="url" id="peLink" placeholder="…or paste an image link" />
               <button type="button" class="card-btn small" id="peLinkAdd">Add</button>
             </div>
-            <p class="hint web-tip">“Search Google” looks up the model number in quotes — open Shopping or a store page, then copy the image address (long-press on a phone) and paste it here, or save it and use “Upload image”.</p>
+            <p class="hint web-tip">On a computer you can also drag photos — or images straight from a store page in another tab — onto this section. “Search Google” looks up the model number in quotes — open Shopping or a store page, then copy the image address (long-press on a phone) and paste it here, or save it and use “Upload image”.</p>
             <label class="check-line"><input type="checkbox" id="pe-stocklabel" ${p.stockPhotos ? 'checked' : ''} /> Show a “Stock photo” label on the website</label>
           </div>
-          <div class="pe-sec">
+          <div class="pe-sec" id="pePhotoSec">
           <div class="af-label">Inventory photos <span class="hint">staff only · never shown on the website</span></div>
           <div class="photo-grid" id="peGrid"></div>
           <label class="upload-btn">
@@ -266,8 +266,8 @@ function openProductEditor(id) {
   const status = m.$('#peStatus');
   function renderPhotos() {
     grid.innerHTML = photos.map((u, i) => `
-      <div class="photo-tile">
-        <button type="button" class="zoom" data-zoom="${i}" aria-label="View photo ${i + 1} larger"><img src="${esc(u)}" alt="" /></button>
+      <div class="photo-tile" draggable="true" data-tile="${i}">
+        <button type="button" class="zoom" draggable="false" data-zoom="${i}" aria-label="View photo ${i + 1} larger"><img src="${esc(u)}" alt="" /></button>
         ${i === 0 ? '<span class="cover">Cover</span>' : ''}
         <div class="tile-actions">
           <button type="button" data-remove="${i}" aria-label="Remove photo">${ic('x')}</button>
@@ -280,8 +280,8 @@ function openProductEditor(id) {
   const webGrid = m.$('#peWeb');
   function renderWeb() {
     webGrid.innerHTML = web.map((u, i) => `
-      <div class="photo-tile">
-        <button type="button" class="zoom" data-zoom="${i}" aria-label="View photo ${i + 1} larger"><img src="${esc(u)}" alt="" /></button>
+      <div class="photo-tile" draggable="true" data-tile="${i}">
+        <button type="button" class="zoom" draggable="false" data-zoom="${i}" aria-label="View photo ${i + 1} larger"><img src="${esc(u)}" alt="" /></button>
         ${i === 0 ? '<span class="cover">Cover</span>' : ''}
         <div class="tile-actions">
           <button type="button" data-move="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move left">${ic('chevron-left')}</button>
@@ -419,9 +419,8 @@ function openProductEditor(id) {
       : `✅ Moved ${n} photo${n > 1 ? 's' : ''} into a new draft — find “Split-off item” in Inventory to fill in its details`);
   }
 
-  m.$('#peFiles').addEventListener('change', async e => {
-    const files = [...e.target.files];
-    e.target.value = '';
+  m.$('#peFiles').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; addInventoryFiles(files); });
+  async function addInventoryFiles(files) {
     if (!files.length) return;
     uploading += files.length;
     status.hidden = false;
@@ -435,10 +434,10 @@ function openProductEditor(id) {
       uploading--;
       renderPhotos();
     }
-    m.$('#peSave').disabled = false;
+    if (!webUploading) m.$('#peSave').disabled = false;
     status.textContent = failed ? `⚠️ ${failed} photo${failed > 1 ? 's' : ''} didn’t upload. Check your connection and try again.` : '✅ Photos uploaded';
     if (!failed) setTimeout(() => { status.hidden = true; }, 2500);
-  });
+  }
 
   m.$('#peAI').addEventListener('click', async () => {
     if (!photos.length && !web.length) return showAdminToast('⚠️ Add a photo first — include the model sticker if you can');
@@ -546,25 +545,56 @@ function openProductEditor(id) {
     window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank', 'noopener');
   });
   // Upload images saved from the web (e.g. to the phone's photo library)
-  m.$('#peWebFiles').addEventListener('change', async e => {
-    const files = [...e.target.files]; e.target.value = '';
+  m.$('#peWebFiles').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; addWebFiles(files); });
+  let webUploading = 0;
+  async function addWebFiles(files) {
+    webUploading += files.length; m.$('#peSave').disabled = true;
+    showAdminToast(`⏳ Uploading ${files.length} image${files.length > 1 ? 's' : ''}…`);
     for (const f of files) {
-      try { web.push(await uploadPhoto(f)); renderWeb(); m.$('#pe-stocklabel').checked = true; }
+      try { web.push(await uploadPhoto(f)); m.$('#pe-stocklabel').checked = true; }
       catch (err) { showAdminToast('⚠️ ' + (err.message || 'Upload failed')); }
+      webUploading--; renderWeb();
     }
-  });
-  // Pasted links are copied into your Drive so they keep working if the store changes its page
+    if (!uploading && !webUploading) m.$('#peSave').disabled = false;
+  }
+  // Links are copied into your Drive so they keep working if the store changes its page (or used as-is if the site blocks it)
+  async function importLink(v, list) {
+    try { const r = await apiPost('admin_import_image', { url: v, name: m.$('#pe-model').value.trim() || m.$('#pe-name').value.trim() }); list.push(r.url); }
+    catch (err) { if (err.code === 'unauthorized') return handleApiError(err, 'Image'); list.push(v); }
+  }
   m.$('#peLinkAdd').addEventListener('click', async () => {
     const v = m.$('#peLink').value.trim();
     if (!/^https?:\/\//i.test(v)) return showAdminToast('⚠️ Paste a full link starting with https://');
     const btn = m.$('#peLinkAdd'); btn.disabled = true; btn.textContent = 'Saving…';
-    try {
-      const r = await apiPost('admin_import_image', { url: v, name: m.$('#pe-model').value.trim() || m.$('#pe-name').value.trim() });
-      web.push(r.url);
-    } catch { web.push(v); } // the site blocked copying — use the link as-is
+    await importLink(v, web);
     m.$('#peLink').value = ''; btn.disabled = false; btn.textContent = 'Add';
     m.$('#pe-stocklabel').checked = true;
     renderWeb();
+  });
+
+  // Drag and drop
+  const busyNote = text => { status.hidden = false; status.textContent = text; };
+  makeTilesDraggable(webGrid, 'web');
+  makeTilesDraggable(grid, 'photos');
+  const reorder = (list, from, to) => { const [x] = list.splice(from, 1); list.splice(to, 0, x); };
+  makeDropZone(m.$('#peWebSec'), {
+    label: 'Drop to add to website images',
+    onFiles: addWebFiles,
+    onUrl: async url => { showAdminToast('⏳ Saving that image…'); await importLink(url, web); m.$('#pe-stocklabel').checked = true; renderWeb(); showAdminToast('✅ Image added — save to keep it'); },
+    onTile: ({ from, i }, e) => {
+      const target = e.target.closest('#peWeb [data-tile]');
+      if (from === 'web') { if (target) { reorder(web, i, +target.dataset.tile); renderWeb(); } return; }
+      const u = photos[i]; if (u && !web.includes(u)) { web.splice(target ? +target.dataset.tile : web.length, 0, u); renderWeb(); showAdminToast('✅ Added to website images'); }
+    },
+  });
+  makeDropZone(m.$('#pePhotoSec'), {
+    label: 'Drop to add inventory photos',
+    onFiles: addInventoryFiles,
+    onUrl: async url => { busyNote('Saving that image…'); await importLink(url, photos); renderPhotos(); busyNote('✅ Photo added'); setTimeout(() => { status.hidden = true; }, 2000); },
+    onTile: ({ from, i }, e) => {
+      const target = e.target.closest('#peGrid [data-tile]');
+      if (from === 'photos' && target) { reorder(photos, i, +target.dataset.tile); renderPhotos(); }
+    },
   });
 
   m.$('#peSave').addEventListener('click', () => {
@@ -614,6 +644,53 @@ function openProductEditor(id) {
     showAdminToast(existing ? `✅ ${name} saved` : `✅ ${name} added`);
   });
 }
+
+// ─── Drag and drop: photo files from the computer, or images dragged from another browser tab ───
+const TILE_TYPE = 'application/x-oa-photo';
+function droppedUrl(dt) {
+  const html = dt.getData('text/html');
+  const fromHtml = html && (html.match(/<img[^>]+src=["']([^"']+)["']/i) || [])[1];
+  const list = (dt.getData('text/uri-list') || '').split('\n').map(x => x.trim()).find(x => x && !x.startsWith('#'));
+  const url = fromHtml || list || dt.getData('text/plain').trim();
+  return /^https?:\/\//i.test(url || '') ? url.replace(/&amp;/g, '&') : '';
+}
+function makeDropZone(el, { onFiles, onUrl, onTile, label = 'Drop photos here' }) {
+  let depth = 0;
+  el.classList.add('drop-zone');
+  el.dataset.dropLabel = label;
+  const accepts = dt => [...dt.types].some(t => t === 'Files' || t === 'text/uri-list' || t === 'text/html' || (t === TILE_TYPE && onTile));
+  el.addEventListener('dragenter', e => { if (!accepts(e.dataTransfer)) return; e.preventDefault(); depth++; el.classList.add('drop-on'); });
+  el.addEventListener('dragover', e => { if (!accepts(e.dataTransfer)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  el.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; el.classList.remove('drop-on'); } });
+  el.addEventListener('drop', e => {
+    depth = 0; el.classList.remove('drop-on');
+    const dt = e.dataTransfer;
+    const tile = dt.getData(TILE_TYPE);
+    if (tile) { if (onTile) { e.preventDefault(); onTile(JSON.parse(tile), e); } return; }
+    e.preventDefault();
+    const files = [...dt.files].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(f.name));
+    if (files.length) return onFiles?.(files);
+    if (dt.files.length) return showAdminToast('⚠️ Only photos can be added here');
+    const url = droppedUrl(dt);
+    if (url && onUrl) onUrl(url);
+    else showAdminToast('⚠️ Couldn’t read that — try saving the image and dropping the file instead');
+  });
+}
+// Drag photo tiles to reorder them (or into another photo section)
+function makeTilesDraggable(grid, from) {
+  grid.addEventListener('dragstart', e => {
+    const t = e.target.closest('[data-tile]');
+    if (!t) return;
+    e.dataTransfer.setData(TILE_TYPE, JSON.stringify({ from, i: +t.dataset.tile }));
+    e.dataTransfer.effectAllowed = 'copyMove';
+    t.classList.add('dragging');
+  });
+  grid.addEventListener('dragend', e => e.target.closest?.('[data-tile]')?.classList.remove('dragging'));
+}
+// Stop a stray drop outside a drop area from opening the photo in place of the staff panel
+['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => {
+  if (!e.target.closest?.('.drop-zone') && [...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault();
+}));
 
 // ─── Photo viewer: tap a photo to see it full size ───
 function openLightbox(urls, start = 0) {
