@@ -102,11 +102,12 @@ function openBulkImport() {
     <div class="bi-pick">
       ${ic('camera')}
       <h3>Choose all the photos you want to add</h3>
-      <p>Select them in one go — phone camera roll or a computer folder. They'll be sorted by when they were taken, grouped by appliance, and the model number is read from whichever photo shows the sticker or box label. These photos stay private (inventory only) — customers see product images found online.</p>
+      <p>Select them in one go — phone camera roll or a computer folder (on a computer you can also drag them onto this box). They'll be sorted by when they were taken, grouped by appliance, and the model number is read from whichever photo shows the sticker or box label. These photos stay private (inventory only) — customers see product images found online.</p>
       <label class="upload-btn">${ic('camera')}<span>Choose photos</span><input type="file" id="biFiles" accept="image/*" multiple hidden /></label>
       <p class="hint">Tip: photograph the model sticker or box label for each appliance. On a phone, keep this screen open until the photos finish uploading.</p>
     </div>`;
   m.$('#biFiles').addEventListener('change', e => start([...e.target.files]));
+  makeDropZone(body.querySelector('.bi-pick'), { label: 'Drop the photos here', onFiles: files => start(files) });
 
   async function start(files) {
     if (!files.length) return;

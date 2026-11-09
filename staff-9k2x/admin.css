@@ -522,6 +522,12 @@
 .tile-actions button { width: 26px; height: 26px; border: none; border-radius: 6px; background: rgba(255,255,255,.92); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; color: var(--navy); }
 .tile-actions button:disabled { opacity: .3; }
 .tile-actions .ic { width: 14px; height: 14px; }
+/* Drag and drop */
+.drop-zone { position: relative; }
+.drop-zone.drop-on { outline: 3px dashed var(--ocean); outline-offset: 4px; border-radius: 12px; }
+.drop-zone.drop-on::after { content: attr(data-drop-label); position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(230,242,252,.88); color: var(--ocean); font-weight: 700; font-size: 1rem; border-radius: 12px; pointer-events: none; z-index: 5; }
+.photo-tile[draggable="true"] { cursor: grab; }
+.photo-tile.dragging { opacity: .4; }
 /* Tap a photo to see it larger */
 .photo-tile .zoom { all: unset; display: block; width: 100%; height: 100%; cursor: zoom-in; }
 .photo-tile .zoom:focus-visible { outline: 3px solid var(--ocean); outline-offset: -3px; }
