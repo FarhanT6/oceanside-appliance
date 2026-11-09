@@ -146,7 +146,7 @@ oceanside-appliance/
 ├── services/               — Repair + used-appliance pages (generated)
 ├── tools/build_pages.py    — Builds product.html, services/, sitemap.xml
 ├── 404.html                — Not-found page
-├── css/styles.css          — Design system (shared with the staff panel)
+├── css/styles.css          — Website design (paper, ink, one accent; hairlines over boxes)
 ├── img/                    — Logo, favicon, social-share image
 ├── js/
 │   ├── core.js             — Config, Sheets API, validation, modals, toast
@@ -159,6 +159,8 @@ oceanside-appliance/
 │   ├── chat.js             — "Ask us" website chat
 │   └── logo.js             — Logo for the staff panel
 ├── staff-9k2x/             — Staff panel (not linked publicly, noindex)
+│   ├── base.css            — Staff panel tokens, buttons, forms, modals (independent of the website CSS)
+│   ├── admin.css           — Staff panel layout and components
 │   ├── admin.js            — Data sync, dashboard, tables, ledger, invoices
 │   ├── admin-tools.js      — Product editor, photos, listings, record sale, detail views, follow-ups
 │   └── bulk-import.js      — Bulk add from photos
