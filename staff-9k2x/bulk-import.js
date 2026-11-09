@@ -140,7 +140,7 @@ function openBulkImport() {
     });
     sub('');
     const unreadable = S.items.filter(it => it.error).length;
-    if (unreadable) showAdminToast(`⚠️ ${unreadable} photo${unreadable > 1 ? 's' : ''} couldn't be opened and ${unreadable > 1 ? 'were' : 'was'} left out`);
+    if (unreadable) showAdminToast(`⚠️ ${unreadable} photo${unreadable > 1 ? 's' : ''} couldn't be opened here and ${unreadable > 1 ? 'were' : 'was'} left out — usually iPhone HEIC photos in Chrome. Add ${unreadable > 1 ? 'them' : 'it'} in Edit product (converted automatically), or use Safari.`);
     S.items = S.items.filter(it => !it.error);
     if (!S.items.length) { m.close(); return; }
 
