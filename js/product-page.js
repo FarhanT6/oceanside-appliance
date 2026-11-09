@@ -45,10 +45,10 @@ function cardHtml(p) {
     <div class="product-media">
       ${img ? `<img src="${esc(img)}" alt="${esc(p.name)}" loading="lazy" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}
       ${p.stockPhotos && img ? '<span class="stock-photo-tag">Stock photo</span>' : ''}
-      <div class="product-tags">${p.condition ? `<span class="tag ${isNewCond(p) ? 'new' : 'used'}">${esc(p.condition)}</span>` : ''}</div>
+
     </div>
     <div class="product-info">
-      <div class="product-category">${esc([p.brand, CATEGORY_SINGULAR[p.category]].filter(Boolean).join(' · '))}</div>
+      <div class="product-category">${esc([p.brand, p.condition || CATEGORY_SINGULAR[p.category]].filter(Boolean).join(' · '))}</div>
       <h3 class="product-name">${esc(p.name)}</h3>
       <div class="product-footer"><div class="product-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
       <span class="card-more">View ${icon('arrow-right')}</span></div>

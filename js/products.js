@@ -242,13 +242,12 @@ function renderProducts(list) {
           : icon(categoryIcon(p.category), 'placeholder-ic')}
         <div class="product-tags">
           ${out ? '<span class="tag out">Sold out</span>' : ''}
-          ${p.condition ? `<span class="tag ${isNew(p) ? 'new' : 'used'}">${esc(p.condition)}</span>` : ''}
           ${save && !out ? `<span class="tag save">Save ${money(save)}</span>` : ''}
         </div>
         ${p.stockPhotos && imgs.length ? '<span class="stock-photo-tag">Stock photo</span>' : ''}
       </div>
       <div class="product-info">
-        <div class="product-category">${esc([p.brand, catLabel].filter(Boolean).join(' · '))}</div>
+        <div class="product-category">${esc([p.brand, p.condition || catLabel].filter(Boolean).join(' · '))}</div>
         <h3 class="product-name">${esc(p.name)}</h3>
         ${p.desc ? `<p class="product-desc">${esc(p.desc)}</p>` : ''}
         <div class="product-footer">

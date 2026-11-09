@@ -12,7 +12,7 @@ import html, json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SITE_URL = 'https://farhant6.github.io/oceanside-appliance/'
-VERSION = '8'  # bump to make browsers fetch fresh CSS/JS
+VERSION = '9'  # bump to make browsers fetch fresh CSS/JS
 
 index = (ROOT / 'index.html').read_text()
 sprite = index[index.index('<!-- ======== ICON SPRITE'):index.index('<!-- ======== NAVBAR')]
@@ -63,7 +63,6 @@ def page(*, path, title, description, body, scripts='', canonical=None, extra_he
     <ul class="nav-links" id="navLinks">
       <li><a href="{base}index.html#products">Shop</a></li>
       <li><a href="{base}index.html#repair">Repair</a></li>
-      <li><a href="{base}index.html#faq">FAQ</a></li>
       <li><a href="{base}index.html#visit">Visit</a></li>
       <li class="nav-phone"><a href="tel:+17607548200"><svg class="ic"><use href="#i-phone"/></svg>(760) 754-8200</a></li>
     </ul>
@@ -94,7 +93,7 @@ def page(*, path, title, description, body, scripts='', canonical=None, extra_he
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>{html.escape(title)}</title>
   <meta name="description" content="{html.escape(description)}" />
-  <meta name="theme-color" content="#1a2e44" />
+  <meta name="theme-color" content="#faf9f6" />
   {f'<link rel="canonical" href="{canonical}" />' if canonical else ''}
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Oceanside Appliance" />
@@ -106,7 +105,7 @@ def page(*, path, title, description, body, scripts='', canonical=None, extra_he
   <link rel="apple-touch-icon" href="{base}img/apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Jost:wght@400;500;600&display=swap" />
   <link rel="stylesheet" href="{base}css/styles.css?v={VERSION}" />
   {extra_head}
 </head>
