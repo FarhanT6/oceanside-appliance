@@ -111,7 +111,7 @@ function updateCartUI(bump = false) {
       ${thumbHtml(p)}
       <div class="cart-item-info">
         <div class="cart-item-name">${esc(p.name)}</div>
-        <div class="cart-item-meta">${esc([p.brand, p.condition].filter(Boolean).join(' · '))} · ${money(p.price)} each</div>
+        <div class="cart-item-meta">${esc([p.brand, simpleCondition(p.condition)].filter(Boolean).join(' · '))} · ${money(p.price)} each</div>
         ${out ? '<div class="cart-item-warn">Just sold out — please remove</div>' : over ? `<div class="cart-item-warn">Only ${p.stock} left</div>` : ''}
         <div class="cart-qty">
           <button type="button" class="qty-btn" data-qty="-1" data-id="${esc(p.id)}" aria-label="Decrease quantity">${icon('minus')}</button>

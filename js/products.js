@@ -247,7 +247,7 @@ function renderProducts(list) {
         ${p.stockPhotos && imgs.length ? '<span class="stock-photo-tag">Stock photo</span>' : ''}
       </div>
       <div class="product-info">
-        <div class="product-category">${esc([p.brand, p.condition || catLabel].filter(Boolean).join(' · '))}</div>
+        <div class="product-category">${esc([p.brand, simpleCondition(p.condition) || catLabel].filter(Boolean).join(' · '))}</div>
         <h3 class="product-name">${esc(p.name)}</h3>
         ${p.desc ? `<p class="product-desc">${esc(p.desc)}</p>` : ''}
         <div class="product-footer">
@@ -272,12 +272,11 @@ function openModal(id) {
   const out = p.stock <= 0;
   const compare = wasPrice(p);
   const note = retailNote(p);
-  const specs = customerSpecs(p);
 
   document.getElementById('modalBody').innerHTML = `
     <div class="pm-gallery">
       <div class="pm-main">${imgs.length ? `<img id="pmMainImg" src="${esc(imgs[0])}" alt="${esc(p.name)}" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}</div>
-      ${p.stockPhotos && imgs.length ? `<div class="stock-photo-note">${icon('alert')}Stock photo of this model${isNew(p) ? '' : ' — the actual unit is ' + esc(p.condition || 'used') + '. Ask to see it in person.'}</div>` : ''}
+      ${p.stockPhotos && imgs.length ? `<div class="stock-photo-note">${icon('alert')}Stock photo of this model${isNew(p) ? '' : ' — the actual unit is ' + esc(simpleCondition(p.condition).toLowerCase() || 'used') + '. Ask to see it in person.'}</div>` : ''}
       ${imgs.length > 1 ? `<div class="pm-thumbs">${imgs.map((src, i) => `<button type="button" data-src="${esc(src)}" aria-label="Photo ${i + 1}" aria-current="${i === 0}"><img src="${esc(src)}" alt="" loading="lazy" /></button>`).join('')}</div>` : ''}
     </div>
     <div class="pm-info">
@@ -286,8 +285,8 @@ function openModal(id) {
       <div class="modal-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
       ${note ? `<div class="product-savings${isNew(p) ? '' : ' plain'}">${isNew(p) ? icon('check') + ' ' : ''}${note}</div>` : ''}
       <div class="stock-bar"><span class="stock-dot${out ? ' out' : p.stock <= 2 ? ' low' : ''}"></span><span>${out ? 'Sold out' : p.stock <= 2 ? `Only ${p.stock} left` : 'In stock and ready'}</span></div>
-      ${p.desc ? `<p class="modal-desc">${esc(p.desc)}</p>` : ''}
-      ${specs.length ? `<div class="modal-specs">${specs.map(([k, v]) => `<div class="spec-item"><strong>${esc(k)}</strong>${esc(v)}</div>`).join('')}</div>` : ''}
+      ${descHtml(p.desc)}
+      ${specsHtml(p)}
       <div class="modal-actions">
         <button type="button" class="btn-primary" data-add="${esc(p.id)}" data-close-after ${out ? 'disabled' : ''}>${out ? 'Sold out' : `${icon('cart')}Add to cart`}</button>
         ${!isNew(p) && !out ? `<button type="button" class="btn-outline" data-view="${esc(p.id)}">${icon('eye')}See it in person</button>` : ''}
@@ -300,6 +299,7 @@ function openModal(id) {
       <div class="pm-note">${icon('pin')}1016 S Tremont St, Oceanside</div>
     </div>`;
   Modal.open(document.getElementById('modalOverlay'));
+  requestAnimationFrame(() => initReadMore(document.getElementById('modalBody')));
 }
 
 function closeModalDirect() { Modal.close(document.getElementById('modalOverlay')); }
@@ -315,7 +315,7 @@ function openViewModal(productId) {
   const imgs = p ? productImages(p) : [];
   document.getElementById('viewProduct').innerHTML = p ? `
     <span class="thumb">${imgs.length ? `<img src="${esc(imgs[0])}" alt="" />` : icon(categoryIcon(p.category))}</span>
-    <span><strong>${esc(p.name)}</strong><span>${esc([p.brand, p.condition, money(p.price)].filter(Boolean).join(' · '))}</span></span>` : '';
+    <span><strong>${esc(p.name)}</strong><span>${esc([p.brand, simpleCondition(p.condition), money(p.price)].filter(Boolean).join(' · '))}</span></span>` : '';
   const form = document.getElementById('viewForm');
   form.reset();
   form.querySelectorAll('.field-error').forEach(e => e.remove());

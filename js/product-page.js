@@ -48,7 +48,7 @@ function cardHtml(p) {
 
     </div>
     <div class="product-info">
-      <div class="product-category">${esc([p.brand, p.condition || CATEGORY_SINGULAR[p.category]].filter(Boolean).join(' · '))}</div>
+      <div class="product-category">${esc([p.brand, simpleCondition(p.condition) || CATEGORY_SINGULAR[p.category]].filter(Boolean).join(' · '))}</div>
       <h3 class="product-name">${esc(p.name)}</h3>
       <div class="product-footer"><div class="product-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
       <span class="card-more">View ${icon('arrow-right')}</span></div>
@@ -75,7 +75,7 @@ function renderFeatured() {
 function setMeta(p) {
   const imgs = productImages(p);
   document.title = `${p.name} — ${money(p.price)} | Oceanside Appliance`;
-  const desc = `${p.condition ? p.condition + ' ' : ''}${p.name}${p.brand ? ' by ' + p.brand : ''} for ${money(p.price)} at Oceanside Appliance in Oceanside, CA.${p.desc ? ' ' + p.desc : ''}`.slice(0, 300);
+  const desc = `${p.condition ? simpleCondition(p.condition) + ' ' : ''}${p.name}${p.brand ? ' by ' + p.brand : ''} for ${money(p.price)} at Oceanside Appliance in Oceanside, CA.${p.desc ? ' ' + p.desc : ''}`.slice(0, 300);
   document.querySelector('meta[name="description"]')?.setAttribute('content', desc);
   document.querySelector('meta[property="og:title"]')?.setAttribute('content', document.title);
   document.querySelector('meta[property="og:description"]')?.setAttribute('content', desc);
@@ -120,7 +120,6 @@ function renderProduct(failed) {
   const out = p.stock <= 0;
   const compare = wasPrice(p);
   const note = retailNote(p);
-  const specs = customerSpecs(p);
   const inCart = readCart().find(i => i.id === p.id)?.qty || 0;
 
   wrap.innerHTML = `
@@ -128,7 +127,7 @@ function renderProduct(failed) {
       <div class="pp-main">${imgs.length ? `<img id="ppMainImg" src="${esc(imgs[0])}" alt="${esc(p.name)}" data-fallback="${categoryIcon(p.category)}" />` : icon(categoryIcon(p.category), 'placeholder-ic')}
         ${out ? '<span class="tag out pp-sold">Sold</span>' : ''}
         ${p.stockPhotos && imgs.length ? '<span class="stock-photo-tag">Stock photo</span>' : ''}</div>
-      ${p.stockPhotos && imgs.length ? `<div class="stock-photo-note">${icon('alert')}Stock photo of this model${isNewCond(p) ? '' : ' — the actual unit is ' + esc(p.condition || 'used') + '. Ask to see it in person.'}</div>` : ''}
+      ${p.stockPhotos && imgs.length ? `<div class="stock-photo-note">${icon('alert')}Stock photo of this model${isNewCond(p) ? '' : ' — the actual unit is ' + esc(simpleCondition(p.condition).toLowerCase() || 'used') + '. Ask to see it in person.'}</div>` : ''}
       ${imgs.length > 1 ? `<div class="pm-thumbs">${imgs.map((src, i) => `<button type="button" data-src="${esc(src)}" aria-label="Photo ${i + 1}" aria-current="${i === 0}"><img src="${esc(src)}" alt="" loading="lazy" /></button>`).join('')}</div>` : ''}
     </div>
     <div class="pp-info">
@@ -137,8 +136,8 @@ function renderProduct(failed) {
       <div class="modal-price">${money(p.price)}${compare > p.price ? `<span class="was">${money(compare)}</span>` : ''}</div>
       ${note ? `<div class="product-savings${isNewCond(p) ? '' : ' plain'}">${isNewCond(p) ? icon('check') + ' ' : ''}${note}</div>` : ''}
       <div class="stock-bar"><span class="stock-dot${out ? ' out' : p.stock <= 2 ? ' low' : ''}"></span><span>${out ? 'This one has sold' : p.stock <= 2 ? `Only ${p.stock} left` : 'In stock and ready'}</span></div>
-      ${p.desc ? `<p class="modal-desc">${esc(p.desc)}</p>` : ''}
-      ${specs.length ? `<div class="modal-specs">${specs.map(([k, v]) => `<div class="spec-item"><strong>${esc(k)}</strong>${esc(v)}</div>`).join('')}</div>` : ''}
+      ${descHtml(p.desc)}
+      ${specsHtml(p)}
       <div class="modal-actions">
         ${out ? `<a class="btn-primary" href="${BASE}index.html#products">See what's in stock</a>`
               : inCart ? `<a class="btn-primary" href="${BASE}index.html#cart">${icon('cart')}In your cart — check out</a>`
@@ -151,6 +150,7 @@ function renderProduct(failed) {
       </div>
       <div class="pm-note">${icon('pin')}1016 S Tremont St, Oceanside · Pickup, or delivery &amp; install available</div>
     </div>`;
+  requestAnimationFrame(() => initReadMore(wrap));
 
   document.getElementById('ppAdd')?.addEventListener('click', () => {
     const cart = readCart();

@@ -52,21 +52,78 @@ function safeUrl(u) {
   try { const url = new URL(u, location.href); return /^https?:$/.test(url.protocol) ? url.href : ''; }
   catch { return ''; }
 }
-// Specs as customers see them: condition and model first, then the rest — without repeats, and
-// without stockroom details (packaging, box labels, dates, serial numbers) or notes like "(per prefix)"
+// Customers see a plain New / Used ("For parts" stays explicit so nobody buys one thinking it works)
+function simpleCondition(c) {
+  c = String(c || '').toLowerCase();
+  if (!c) return '';
+  if (c.startsWith('new')) return 'New';
+  if (c.includes('part')) return 'For parts';
+  return 'Used';
+}
+
+// The few facts customers need up front, plus everything else for an "All specs" fold.
+// Stockroom details (packaging, box labels, dates, serial numbers) and notes like "(per prefix)" are never shown.
 const HIDDEN_SPEC = /^(model|model ?(no|number|#)\.?|condition|packaging|package|box.*|carton.*|.*\bdate\b.*|serial.*|manufactur.*|mfg.*|.*\blabel\b.*|sticker.*|sku|upc|barcode)$/i;
+const NO_FUEL = ['refrigerator', 'freezer', 'washer', 'dishwasher', 'microwave', 'vacuum'];
 function customerSpecs(p) {
-  const out = [];
-  if (p.condition) out.push(['Condition', String(p.condition)]);
-  if (p.model) out.push(['Model', String(p.model)]);
+  const extra = [];
   Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {}).forEach(([k, v]) => {
     k = String(k).trim();
     v = String(v ?? '').trim().replace(/\s*\((?:per|based on|from|according to|inferred|likely|probably|see)\b[^)]*\)\s*$/i, '');
-    if (!k || !v || HIDDEN_SPEC.test(k) || out.some(([x]) => x.toLowerCase() === k.toLowerCase())) return;
-    out.push([k, v]);
+    if (!k || !v || HIDDEN_SPEC.test(k) || extra.some(([x]) => x.toLowerCase() === k.toLowerCase())) return;
+    extra.push([k, v]);
   });
-  return out;
+  const used = new Set();
+  const take = re => { const hit = extra.find(([k]) => re.test(k)); if (hit) used.add(hit[0]); return hit ? hit[1] : ''; };
+  const peek = re => (extra.find(([k]) => re.test(k)) || [])[1] || '';
+
+  const main = [];
+  const cond = simpleCondition(p.condition);
+  if (cond) main.push(['Condition', cond]);
+  main.push(['Type', applianceType(p, take(/^(installation|type|style|configuration)$/i))]);
+  if (p.model) main.push(['Model', String(p.model)]);
+  const fuelRaw = take(/fuel|power/i);
+  const fuel = /dual/i.test(fuelRaw) ? 'Dual fuel' : /gas|propane|\blp\b/i.test(fuelRaw) ? 'Gas' : /electric|\d+\s*v\b/i.test(fuelRaw) ? 'Electric' : '';
+  if (fuel && !NO_FUEL.includes(p.category)) main.push(['Gas or electric', fuel]);
+  const color = take(/colou?r|finish/i);
+  if (color) main.push(['Color / finish', color]);
+  const width = (peek(/^(dimensions?|size)$/i).match(/(\d+(?:\.\d+)?)\s*(?:"|″|''|in(?:ches)?\.?)?\s*W\b/i) || [])[1];
+  const capacity = peek(/capacity/i).replace(/\s*cu\.?\s*ft\.?/i, ' cu ft');
+  const size = [width && `${width}″ wide`, capacity].filter(Boolean).join(' · ');
+  if (size) main.push(['Size', size]);
+  return { main, more: extra.filter(([k]) => !used.has(k)) };
 }
+// "Built-in single wall oven", "Front-load washer"… or just the category
+function applianceType(p, install) {
+  const cat = CATEGORY_SINGULAR[p.category] || 'Appliance';
+  install = String(install || '').trim();
+  if (!install) return cat;
+  if (/oven|range|cooktop|washer|dryer|fridge|refrigerator|freezer|dishwasher|microwave|hood|heater|vacuum/i.test(install)) return install[0].toUpperCase() + install.slice(1);
+  const noun = { washer: 'washer', dryer: 'dryer', refrigerator: 'refrigerator', dishwasher: 'dishwasher', microwave: 'microwave', freezer: 'freezer',
+                 oven: /slide|free|front control/i.test(install) ? 'range' : 'oven' }[p.category];
+  return noun ? `${install[0].toUpperCase() + install.slice(1)} ${noun}` : install;
+}
+function specsHtml(p) {
+  const { main, more } = customerSpecs(p);
+  const grid = list => `<div class="modal-specs">${list.map(([k, v]) => `<div class="spec-item"><strong>${esc(k)}</strong>${esc(v)}</div>`).join('')}</div>`;
+  return (main.length ? grid(main) : '') +
+    (more.length ? `<details class="all-specs"><summary>All specs <span>${more.length}</span></summary>${grid(more)}</details>` : '');
+}
+// Long descriptions show three lines with "Read more"
+function descHtml(text) {
+  return text ? `<p class="modal-desc clamp">${esc(text)}</p><button type="button" class="read-more" data-readmore hidden>Read more</button>` : '';
+}
+function initReadMore(root) {
+  (root || document).querySelectorAll('.modal-desc.clamp').forEach(el => {
+    const btn = el.nextElementSibling;
+    if (btn && btn.matches('[data-readmore]')) btn.hidden = el.scrollHeight <= el.clientHeight + 2;
+  });
+}
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-readmore]'); if (!btn) return;
+  const el = btn.previousElementSibling; const open = el.classList.toggle('clamp') === false;
+  btn.textContent = open ? 'Show less' : 'Read more';
+});
 
 function productImages(p) {
   return String(p.imageUrl || '').split(/[\s,]+/).filter(Boolean).map(safeUrl).filter(Boolean);

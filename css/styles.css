@@ -347,6 +347,16 @@ a { color: var(--accent); text-underline-offset: .2em; }
 .modal-specs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.5rem; border-top: 1px solid var(--line); }
 .spec-item { padding: .7rem 0; border-bottom: 1px solid var(--line); font-size: .88rem; color: var(--ink); }
 .spec-item strong { display: block; font-size: .66rem; font-weight: 500; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); margin-bottom: .1rem; }
+.modal-desc.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.read-more { align-self: flex-start; margin-top: -.35rem; padding: 0; border: none; background: none; font: inherit; font-size: .85rem; color: var(--ink); text-decoration: underline; text-underline-offset: .25em; text-decoration-color: var(--line-2); cursor: pointer; }
+.read-more:hover { text-decoration-color: var(--ink); }
+.all-specs summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: .8rem 0; border-bottom: 1px solid var(--line); font-size: .85rem; color: var(--ink-2); }
+.all-specs summary::-webkit-details-marker { display: none; }
+.all-specs summary::after { content: '+'; font-size: 1.1rem; line-height: 1; color: var(--ink-3); transition: transform .3s var(--ease); }
+.all-specs[open] summary::after { transform: rotate(45deg); }
+.all-specs summary span { margin-left: .45rem; margin-right: auto; font-size: .72rem; color: var(--ink-3); }
+.all-specs summary:hover { color: var(--ink); }
+.all-specs .modal-specs { border-top: none; }
 .modal-actions { display: flex; gap: .6rem; margin-top: .6rem; flex-wrap: wrap; }
 .modal-actions > * { flex: 1 1 180px; }
 .pp-secondary { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: .85rem; margin-top: .25rem; }

@@ -911,7 +911,7 @@ function aiProductFromPhotos(d) {
     model: { type: 'string', description: 'Model number exactly as printed on the rating plate/sticker, or empty.' },
     category: { type: 'string', enum: APPLIANCE_CATEGORIES },
     conditionGuess: { type: 'string', enum: ['New', 'New (Open Box)', 'Used - Excellent', 'Used - Good', 'Used - Fair', 'For Parts', 'Unknown'] },
-    description: { type: 'string', description: '2-4 plain sentences shown to customers on the website: type, size/capacity, finish, notable features, visible cosmetic marks. Write it like a salesperson describing the product — never mention the photos, labels, stickers, model-number prefixes or anything you could not confirm (put that in checkBeforeSaving instead).' },
+    description: { type: 'string', description: '2-3 short, plain sentences shown to customers on the website: type, size/capacity, finish, notable features, visible cosmetic marks. Write it like a salesperson describing the product — never mention the photos, labels, stickers, model-number prefixes or anything you could not confirm (put that in checkBeforeSaving instead).' },
     specs: specsSchema(),
     checkBeforeSaving: { type: 'string', description: 'Anything uncertain the staff member should verify, or empty.' }
   });
@@ -1423,7 +1423,7 @@ function autoSpecsFor(p) {
       schema: strictObject({
         found: { type: 'boolean', description: 'true only if the notes describe this exact model.' },
         specs: specsSchema(),
-        description: { type: 'string', description: '2-4 plain sentences for customers on the website.' }
+        description: { type: 'string', description: '2-3 short, plain sentences for customers on the website.' }
       }),
       system: 'You write product details for Oceanside Appliance, a new and used appliance store. Use only facts the notes state for this exact model. ' +
         'The description is shown to customers: describe the product (type, size/capacity, finish, key features) and keep any true details about this ' +
