@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="../css/styles.css?v=21" />
-  <link rel="stylesheet" href="admin.css?v=21" />
+  <link rel="stylesheet" href="../css/styles.css?v=22" />
+  <link rel="stylesheet" href="admin.css?v=22" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -306,25 +306,46 @@
 
     <!-- ── INVENTORY TAB ── -->
     <div class="admin-tab" id="tab-inventory">
-      <div class="admin-card">
-        <div class="card-header inv-header">
-          <div class="card-title">Inventory</div>
-          <input type="search" class="table-search" id="inventorySearch" placeholder="Search products…" oninput="renderInventory()" />
-          <div class="card-tools inv-actions">
-            <button class="card-btn ai" onclick="openBulkImport()"><svg class="ic"><use href="../img/icons.svg#i-camera"/></svg> Bulk add from photos</button>
-            <button class="card-btn primary" onclick="openProductEditor()"><svg class="ic"><use href="../img/icons.svg#i-plus"/></svg> Add Product</button>
-            <button class="card-btn" onclick="findMissingWebImages()" title="Look online for product photos for every in-stock item that has none"><svg class="ic"><use href="../img/icons.svg#i-search"/></svg> Find web images</button>
-            <button class="card-btn" onclick="researchMissingPrices()" title="Research prices for every in-stock item that hasn't been researched"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg> Research prices</button>
-            <span class="inv-actions-gap"></span>
-            <button class="card-btn" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save All</button>
-            <button class="card-btn" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
-            <button class="card-btn" onclick="exportCSV('inventory')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg> CSV</button>
+      <div class="admin-card inv-card">
+        <div class="inv-top">
+          <div>
+            <div class="card-title">Inventory</div>
+            <div class="inv-summary" id="invSummary"></div>
+          </div>
+          <div class="inv-top-actions">
+            <button class="card-btn ai" onclick="openBulkImport()"><svg class="ic"><use href="../img/icons.svg#i-camera"/></svg> Bulk add</button>
+            <button class="card-btn primary" onclick="openProductEditor()"><svg class="ic"><use href="../img/icons.svg#i-plus"/></svg> Add product</button>
+            <div class="inv-more">
+              <button class="card-btn inv-more-btn" id="invMenuBtn" onclick="toggleInvMenu()" aria-haspopup="true" aria-expanded="false" aria-label="More actions">•••</button>
+              <div class="inv-menu" id="invMenu" hidden>
+                <button onclick="findMissingWebImages()"><svg class="ic"><use href="../img/icons.svg#i-search"/></svg><span>Find web images<small>For in-stock items that have none</small></span></button>
+                <button onclick="researchMissingPrices()"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg><span>Research prices<small>For in-stock items not researched yet</small></span></button>
+                <button onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg><span>Refresh from Google Sheets</span></button>
+                <button onclick="exportCSV('inventory')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg><span>Download CSV</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="inv-tabs" id="invTabs" role="tablist" aria-label="Show"></div>
+        <div class="inv-filterbar">
+          <label class="inv-search"><svg class="ic"><use href="../img/icons.svg#i-search"/></svg><span class="sr-only">Search inventory</span>
+            <input type="search" id="inventorySearch" placeholder="Search name, model #, location…" title="Search by name, brand, model number or location" oninput="renderInventory()" autocomplete="off" />
+          </label>
+          <button type="button" class="card-btn inv-filter-btn" id="invFilterBtn" onclick="toggleInvFilters()" aria-expanded="false" aria-controls="invFilterBox"><svg class="ic"><use href="../img/icons.svg#i-sliders"/></svg> Filters <span class="inv-count" id="invFilterCount" hidden></span></button>
+          <div class="inv-filter-box" id="invFilterBox">
+            <div class="inv-selects" id="invSelects"></div>
+            <button type="button" class="link-btn inv-clear" id="invClear" onclick="clearInvFilters()" hidden>Clear filters</button>
           </div>
         </div>
         <table class="admin-table inv-table">
-          <thead><tr><th></th><th>Product</th><th>Condition</th><th>Location</th><th>Price ($)</th><th>Stock</th><th>Actions</th></tr></thead>
+          <thead><tr><th></th><th>Product</th><th>Condition</th><th>Location</th><th>Price ($)</th><th>Stock</th><th></th></tr></thead>
           <tbody id="inventoryTbody"></tbody>
         </table>
+        <div class="inv-savebar" id="invSaveBar" hidden>
+          <span data-count></span>
+          <button type="button" class="card-btn" onclick="discardInventoryEdits()">Discard</button>
+          <button type="button" class="card-btn primary" onclick="saveAllInventory()"><svg class="ic"><use href="../img/icons.svg#i-check"/></svg> Save changes</button>
+        </div>
       </div>
     </div>
 
@@ -356,9 +377,9 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=21"></script>
-<script src="admin-tools.js?v=21"></script>
-<script src="bulk-import.js?v=21"></script>
+<script src="admin.js?v=22"></script>
+<script src="admin-tools.js?v=22"></script>
+<script src="bulk-import.js?v=22"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">
