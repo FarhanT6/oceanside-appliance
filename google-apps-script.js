@@ -26,6 +26,7 @@
 //     POST {type:'admin_import_image', key, url}            → copies an online image into Drive
 //     POST {type:'admin_auto_images', key, id}              → AI: finds + saves website images now
 //     POST {type:'admin_auto_price', key, id}               → AI: researches + saves the price range now
+//     POST {type:'admin_auto_specs', key, id}               → AI: looks up the model, fills in specs & dimensions
 //     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //     POST {type:'admin_followups', key}                    → AI: drafts customer follow-ups now
 //     POST {type:'admin_ai_email', key, email}              → AI: drafts a reply to a customer email
@@ -228,6 +229,7 @@ function doPost(e) {
     if (type === 'admin_ai_find_images') return jsonResponse({ success: true, candidates: findProductImages(data.product || {}, data.refs || []) });
     if (type === 'admin_auto_images')  return jsonResponse(autoImagesEndpoint(data));
     if (type === 'admin_auto_price')   return jsonResponse(autoPriceEndpoint(data));
+    if (type === 'admin_auto_specs')   return jsonResponse(autoSpecsEndpoint(data));
     if (type === 'admin_import_image') return jsonResponse(importImageFromUrl(data.url, data.name));
     if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_followups')    return jsonResponse(generateFollowups());
@@ -851,10 +853,24 @@ function imageBlock(url) {
 const SPEC_GUIDE = 'Use these labels when known, in this order: "Dimensions" (width × height × depth in inches, e.g. 29.75" W × 28.75" H × 24.5" D), ' +
   '"Cutout size" (built-ins only), "Capacity" (cu ft, or place settings for dishwashers), "Fuel / power" (gas, electric, voltage/amps), ' +
   '"Installation" (freestanding, slide-in, built-in, front-load, top-load, over-the-range…), "Color / finish", "Weight" (lbs), ' +
-  'then up to 4 "Feature" items (e.g. "Convection", "Ice maker", "Steam clean"). Only include values you are sure apply to this exact model.';
+  'then "Features" (up to 4, comma-separated, e.g. "Convection, Air fry, Steam clean"). Only include values you are sure apply to this exact model. ' +
+  'Never include the model number, condition, packaging, box or carton labels, dates or serial numbers (those are shown elsewhere or not for customers). ' +
+  'Values are plain facts for customers — no notes on how you know them (not "Electric (per model prefix)", just "Electric").';
 function specsSchema() {
   return { type: 'array', description: 'Product specifications. ' + SPEC_GUIDE,
            items: strictObject({ label: { type: 'string' }, value: { type: 'string' } }) };
+}
+// Spec labels that don't belong on the website (shown elsewhere, or only matter in the stockroom)
+const JUNK_SPEC = /^(model|model ?(no|number|#)\.?|condition|packaging|package|box.*|carton.*|.*\bdate\b.*|serial.*|manufactur.*|mfg.*|.*\blabel\b.*|sticker.*|sku|upc|barcode)$/i;
+// "Electric (per WED prefix)" → "Electric"
+function cleanSpecValue(v) { return clean(v, 120).replace(/\s*\((?:per|based on|from|according to|inferred|likely|probably|see)\b[^)]*\)\s*$/i, ''); }
+function cleanSpecs(specs) {
+  const out = {};
+  Object.keys(specs && typeof specs === 'object' && !Array.isArray(specs) ? specs : {}).forEach(k => {
+    const key = clean(k, 40), val = cleanSpecValue(specs[k]);
+    if (key && val && !JUNK_SPEC.test(key)) out[key] = val;
+  });
+  return out;
 }
 
 // Look up an exact model number on the web and return what was found, as plain notes
@@ -895,7 +911,7 @@ function aiProductFromPhotos(d) {
     model: { type: 'string', description: 'Model number exactly as printed on the rating plate/sticker, or empty.' },
     category: { type: 'string', enum: APPLIANCE_CATEGORIES },
     conditionGuess: { type: 'string', enum: ['New', 'New (Open Box)', 'Used - Excellent', 'Used - Good', 'Used - Fair', 'For Parts', 'Unknown'] },
-    description: { type: 'string', description: '2-4 plain sentences for customers: type, size/capacity, finish, notable features, visible cosmetic marks.' },
+    description: { type: 'string', description: '2-4 plain sentences shown to customers on the website: type, size/capacity, finish, notable features, visible cosmetic marks. Write it like a salesperson describing the product — never mention the photos, labels, stickers, model-number prefixes or anything you could not confirm (put that in checkBeforeSaving instead).' },
     specs: specsSchema(),
     checkBeforeSaving: { type: 'string', description: 'Anything uncertain the staff member should verify, or empty.' }
   });
@@ -914,6 +930,7 @@ function aiProductFromPhotos(d) {
       (byModel ? '\n\n<web_lookup_notes>\n' + (facts || 'Nothing found online for this model number.') + '\n</web_lookup_notes>' : '') }])
   });
   if (byModel) result.model = clean(hints.model, 60);
+  result.specs = (result.specs || []).filter(x => x && x.label && !JUNK_SPEC.test(clean(x.label, 40))).map(x => ({ label: clean(x.label, 40), value: cleanSpecValue(x.value) })).filter(x => x.value);
   return { success: true, suggestion: result };
 }
 
@@ -1318,7 +1335,18 @@ function addMissingSpecs(current, found) {
   const have = {}; Object.keys(cur).forEach(k => { have[k.toLowerCase()] = true; });
   const out = Object.assign({}, cur);
   let added = 0;
-  (found || []).forEach(x => { if (x && x.label && x.value && !have[x.label.toLowerCase()]) { out[x.label] = x.value; have[x.label.toLowerCase()] = true; added++; } });
+  // The same label twice (e.g. several "Feature" items) becomes one comma-separated "Features" line
+  const grouped = [];
+  (found || []).forEach(x => {
+    let label = clean(x && x.label, 40); const value = cleanSpecValue(x && x.value);
+    if (/^features?$/i.test(label)) label = 'Features';
+    const g = grouped.find(y => y.label.toLowerCase() === label.toLowerCase());
+    if (g) { if (value && g.value.split(', ').indexOf(value) < 0) g.value += ', ' + value; } else grouped.push({ label: label, value: value });
+  });
+  grouped.forEach(x => {
+    const label = x.label, value = x.value;
+    if (label && value && !JUNK_SPEC.test(label) && !have[label.toLowerCase()]) { out[label] = value; have[label.toLowerCase()] = true; added++; }
+  });
   return added ? out : null;
 }
 
@@ -1374,6 +1402,57 @@ function autoPriceEndpoint(d) {
   const p = readCollection('inventory').find(x => x.id === d.id);
   if (!p) return fail('Product not found.');
   return { success: true, update: autoPriceFor(p) };
+}
+
+// ─── SPECS & DIMENSIONS for items already in stock ───
+// Descriptions written from photos sometimes describe the photos instead of the product
+const LEAKY_DESC = /could not be (confirmed|determined|read|verified|seen)|(from|in) the photos?|visible in (the|this) photo|model[- ]?(number )?prefix|prefix ['"]|rating plate|sticker|indicates an?\b/i;
+
+// Looks the model up online, adds the specs the item is missing, removes stockroom-only specs, and
+// rewrites the description only if it talks about photos/labels instead of the product.
+function autoSpecsFor(p) {
+  const update = { id: p.id, specsCheckedAt: new Date().toISOString() };
+  markAttempt(p.id, { specsCheckedAt: update.specsCheckedAt });
+  const model = clean(p.model, 60);
+  let found = null;
+  try {
+    if (!model) throw new Error('Add the model number first.');
+    const facts = lookupModelFacts(clean(p.brand, 60), model);
+    found = callClaude({
+      effort: 'low',
+      schema: strictObject({
+        found: { type: 'boolean', description: 'true only if the notes describe this exact model.' },
+        specs: specsSchema(),
+        description: { type: 'string', description: '2-4 plain sentences for customers on the website.' }
+      }),
+      system: 'You write product details for Oceanside Appliance, a new and used appliance store. Use only facts the notes state for this exact model. ' +
+        'The description is shown to customers: describe the product (type, size/capacity, finish, key features) and keep any true details about this ' +
+        'particular unit from the old description (e.g. still sealed, box scuffs, cosmetic marks). Never mention photos, labels, stickers, model-number ' +
+        'prefixes or what could not be confirmed. No prices. If the notes could not find this exact model, set found to false.',
+      content: [{ type: 'text', text:
+        'Our unit: ' + clean([p.brand, p.name].filter(Boolean).join(' '), 200) + ' (model ' + model + '), condition: ' + (clean(p.condition, 40) || 'unknown') + '.\n' +
+        'Old description: ' + (clean(p.desc, 900) || '(none)') + '\n\n<model_notes>\n' + (facts || 'Nothing found.') + '\n</model_notes>' }]
+    });
+    if (!found.found) update.specsNote = 'Couldn’t find this exact model online — check the model number.';
+    else update.specsNote = '';
+  } catch (err) {
+    update.specsNote = String(err && err.message || err).slice(0, 200);
+  }
+  withLock(() => { // compare with the item as it is now, in case it was edited during the lookup
+    const now = readCollection('inventory').find(x => x.id === p.id);
+    if (!now) return;
+    const cleaned = cleanSpecs(now.specs);
+    const merged = (found && found.found && addMissingSpecs(cleaned, found.specs)) || cleaned;
+    if (JSON.stringify(merged) !== JSON.stringify(now.specs || {})) update.specs = merged;
+    if (found && found.found && clean(found.description, 900) && (!clean(now.desc, 900) || LEAKY_DESC.test(String(now.desc)))) update.desc = clean(found.description, 900);
+    upsertRecords('inventory', [update], 'specs lookup', { onlyExisting: true });
+  });
+  return update;
+}
+function autoSpecsEndpoint(d) {
+  const p = readCollection('inventory').find(x => x.id === d.id);
+  if (!p) return fail('Product not found.');
+  return { success: true, update: autoSpecsFor(p) };
 }
 
 // ─── MORNING BRIEFING ───

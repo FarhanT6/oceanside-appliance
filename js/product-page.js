@@ -120,9 +120,7 @@ function renderProduct(failed) {
   const out = p.stock <= 0;
   const compare = wasPrice(p);
   const note = retailNote(p);
-  const specs = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {});
-  if (p.model) specs.unshift(['Model', p.model]);
-  if (p.condition) specs.unshift(['Condition', p.condition]);
+  const specs = customerSpecs(p);
   const inCart = readCart().find(i => i.id === p.id)?.qty || 0;
 
   wrap.innerHTML = `

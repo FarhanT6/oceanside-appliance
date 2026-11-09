@@ -52,6 +52,22 @@ function safeUrl(u) {
   try { const url = new URL(u, location.href); return /^https?:$/.test(url.protocol) ? url.href : ''; }
   catch { return ''; }
 }
+// Specs as customers see them: condition and model first, then the rest — without repeats, and
+// without stockroom details (packaging, box labels, dates, serial numbers) or notes like "(per prefix)"
+const HIDDEN_SPEC = /^(model|model ?(no|number|#)\.?|condition|packaging|package|box.*|carton.*|.*\bdate\b.*|serial.*|manufactur.*|mfg.*|.*\blabel\b.*|sticker.*|sku|upc|barcode)$/i;
+function customerSpecs(p) {
+  const out = [];
+  if (p.condition) out.push(['Condition', String(p.condition)]);
+  if (p.model) out.push(['Model', String(p.model)]);
+  Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {}).forEach(([k, v]) => {
+    k = String(k).trim();
+    v = String(v ?? '').trim().replace(/\s*\((?:per|based on|from|according to|inferred|likely|probably|see)\b[^)]*\)\s*$/i, '');
+    if (!k || !v || HIDDEN_SPEC.test(k) || out.some(([x]) => x.toLowerCase() === k.toLowerCase())) return;
+    out.push([k, v]);
+  });
+  return out;
+}
+
 function productImages(p) {
   return String(p.imageUrl || '').split(/[\s,]+/).filter(Boolean).map(safeUrl).filter(Boolean);
 }

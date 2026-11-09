@@ -272,9 +272,7 @@ function openModal(id) {
   const out = p.stock <= 0;
   const compare = wasPrice(p);
   const note = retailNote(p);
-  const specs = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {});
-  if (p.model) specs.unshift(['Model', p.model]);
-  if (p.condition) specs.unshift(['Condition', p.condition]);
+  const specs = customerSpecs(p);
 
   document.getElementById('modalBody').innerHTML = `
     <div class="pm-gallery">

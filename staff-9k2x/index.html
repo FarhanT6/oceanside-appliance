@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel — Oceanside Appliance</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap" />
-  <link rel="stylesheet" href="base.css?v=23" />
-  <link rel="stylesheet" href="admin.css?v=23" />
+  <link rel="stylesheet" href="base.css?v=24" />
+  <link rel="stylesheet" href="admin.css?v=24" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -319,6 +319,7 @@
               <button class="card-btn inv-more-btn" id="invMenuBtn" onclick="toggleInvMenu()" aria-haspopup="true" aria-expanded="false" aria-label="More actions">•••</button>
               <div class="inv-menu" id="invMenu" hidden>
                 <button onclick="findMissingWebImages()"><svg class="ic"><use href="../img/icons.svg#i-search"/></svg><span>Find web images<small>For in-stock items that have none</small></span></button>
+                <button onclick="fillMissingSpecs()"><svg class="ic"><use href="../img/icons.svg#i-file"/></svg><span>Fill in specs &amp; dimensions<small>Looks up each model online · once per item</small></span></button>
                 <button onclick="researchMissingPrices()"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg><span>Research prices<small>For in-stock items not researched yet</small></span></button>
                 <button onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg><span>Refresh from Google Sheets</span></button>
                 <button onclick="exportCSV('inventory')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg><span>Download CSV</span></button>
@@ -377,9 +378,9 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=23"></script>
-<script src="admin-tools.js?v=23"></script>
-<script src="bulk-import.js?v=23"></script>
+<script src="admin.js?v=24"></script>
+<script src="admin-tools.js?v=24"></script>
+<script src="bulk-import.js?v=24"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

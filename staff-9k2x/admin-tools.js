@@ -1288,7 +1288,7 @@ async function draftFollowupsNow(btn) {
 }
 
 // ─── Background jobs: website images + price research, one product at a time ───
-const imageJobs = new Set(), priceJobs = new Set();
+const imageJobs = new Set(), priceJobs = new Set(), specJobs = new Set();
 let jobChain = Promise.resolve();
 function queueJob(fn) { jobChain = jobChain.then(fn, fn); return jobChain; }
 
@@ -1305,20 +1305,27 @@ async function runProductJobs({ type, ids, set, missing, label }) {
         const { update } = await apiPost(type, { id });
         const all = getStore('inventory'); const p = all.find(x => x.id === id);
         if (p && update) { Object.assign(p, update); setStore('inventory', all); }
-        if (update && (update.imageUrl || update.priceResearch)) done++;
+        if (update && (update.imageUrl || update.priceResearch || update.specs || update.desc)) done++;
       } catch (err) {
         if (err.code === 'unauthorized') { handleApiError(err, label); break; }
       } finally { set.delete(id); renderInventorySafely(); }
     }
     todo.forEach(id => set.delete(id));
     syncStorefront(); renderInventorySafely();
-    showAdminToast(`${type === 'admin_auto_images' ? '🖼 Website images' : '💲 Price research'}: ${done} of ${todo.length} done${done < todo.length ? ' — hover the tag to see why' : ''}`);
+    const what = { admin_auto_images: '🖼 Website images', admin_auto_price: '💲 Price research', admin_auto_specs: '📐 Specs & dimensions' }[type];
+    showAdminToast(`${what}: ${done} of ${todo.length} updated${done < todo.length ? (type === 'admin_auto_specs' ? ' — the rest were already complete or their model wasn’t found' : ' — hover the tag to see why') : ''}`);
   });
 }
 
 function findMissingWebImages(ids) {
   return runProductJobs({ type: 'admin_auto_images', ids, set: imageJobs, label: 'find images for',
     missing: p => !String(p.imageUrl || '').trim() });
+}
+// Look up each in-stock item's model number online: add missing specs & dimensions, remove
+// stockroom-only specs, and fix descriptions that talk about the photos. Once per item.
+function fillMissingSpecs(ids) {
+  return runProductJobs({ type: 'admin_auto_specs', ids, set: specJobs, label: 'fill in specs for',
+    missing: p => String(p.model || '').trim() && !p.specsCheckedAt });
 }
 function researchMissingPrices(ids) {
   return runProductJobs({ type: 'admin_auto_price', ids, set: priceJobs, label: 'research prices for',
