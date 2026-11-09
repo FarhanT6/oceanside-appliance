@@ -715,16 +715,45 @@ function deleteRecords(name, ids) {
 
 // ─── PRODUCT PHOTOS (stored in a Google Drive folder, shared view-only) ───
 function uploadImage(d) {
-  const mime = /^image\/(jpeg|png|webp)$/.test(d.mimeType) ? d.mimeType : 'image/jpeg';
+  const convert = /^image\/(heic|heif|avif)$/.test(d.mimeType); // photos the browser couldn't open (e.g. iPhone HEIC)
+  const mime = /^image\/(jpeg|png|webp)$/.test(d.mimeType) || convert ? d.mimeType : 'image/jpeg';
   let bytes;
   try { bytes = Utilities.base64Decode(String(d.data || '')); } catch (err) { return fail('Could not read that image.'); }
   if (!bytes || !bytes.length) return fail('Could not read that image.');
   if (bytes.length > 10 * 1024 * 1024) return fail('That photo is too large (max 10 MB).');
   const name = clean(d.filename, 80) || ('photo-' + Date.now() + '.jpg');
-  const file = getPhotoFolder().createFile(Utilities.newBlob(bytes, mime, name));
+  const folder = getPhotoFolder();
+  const file = folder.createFile(Utilities.newBlob(bytes, mime, name));
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  if (convert) {
+    const jpg = driveRenderAsJpeg(file);
+    if (!jpg) { file.setTrashed(true); return fail('That photo is in a format that couldn’t be converted (HEIC). Open it on your Mac or iPhone and export it as a JPG.'); }
+    const out = folder.createFile(jpg.setName(name.replace(/\.[^.]+$/, '') + '.jpg'));
+    out.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    file.setTrashed(true);
+    return { success: true, id: out.getId(), url: 'https://lh3.googleusercontent.com/d/' + out.getId() + '=w1600', converted: true };
+  }
   const id = file.getId();
   return { success: true, id: id, url: 'https://lh3.googleusercontent.com/d/' + id + '=w1600' };
+}
+
+// Google Drive can read HEIC photos: ask it for a large JPEG rendering of the file (it can take a few seconds to be ready)
+function driveRenderAsJpeg(file) {
+  const auth = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  for (let i = 0; i < 6; i++) {
+    if (i) Utilities.sleep(1500 + i * 1000);
+    const meta = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + file.getId() + '?fields=thumbnailLink',
+      { headers: auth, muteHttpExceptions: true });
+    if (meta.getResponseCode() !== 200) continue;
+    const link = (JSON.parse(meta.getContentText()) || {}).thumbnailLink;
+    if (!link) continue; // Drive hasn't made it yet
+    const res = UrlFetchApp.fetch(link.replace(/=s\d+[^&]*$/, '') + '=s1600', { headers: auth, muteHttpExceptions: true, followRedirects: true });
+    const blob = res.getBlob(), type = String(blob.getContentType() || '');
+    if (res.getResponseCode() === 200 && /^image\/(jpeg|png|webp)/.test(type) && blob.getBytes().length > 2000) {
+      return /jpeg/.test(type) ? blob : blob.getAs('image/jpeg');
+    }
+  }
+  return null;
 }
 
 // Copy an image from the web into our Drive folder (so it never breaks or hotlinks)

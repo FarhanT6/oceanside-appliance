@@ -105,12 +105,40 @@ async function resizeToJpegBase64(file, max = 1600, quality = 0.82) {
   }
 }
 
-async function uploadPhoto(file) {
-  const data = await resizeToJpegBase64(file);
-  const res = await apiPost('admin_upload_image', {
-    data, mimeType: 'image/jpeg',
-    filename: (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg',
+// What a file really is, from its first bytes (a ".jpg" from an iPhone is sometimes really HEIC)
+async function sniffImageType(file) {
+  const b = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const str = (from, to) => String.fromCharCode(...b.slice(from, to));
+  if (!b.length) return 'empty';
+  if (b[0] === 0xFF && b[1] === 0xD8) return 'jpeg';
+  if (b[0] === 0x89 && str(1, 4) === 'PNG') return 'png';
+  if (str(0, 4) === 'RIFF' && str(8, 12) === 'WEBP') return 'webp';
+  if (str(0, 3) === 'GIF') return 'gif';
+  if (str(4, 8) === 'ftyp' && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1|avif)/.test(str(8, 12))) return str(8, 12) === 'avif' ? 'avif' : 'heic';
+  return 'unknown';
+}
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1]);
+    r.onerror = () => rej(new Error('Could not read that file.'));
+    r.readAsDataURL(file);
   });
+}
+async function uploadPhoto(file) {
+  const base = (file.name || 'photo').replace(/\.[^.]+$/, '');
+  let data;
+  try { data = await resizeToJpegBase64(file); }
+  catch (err) {
+    // This browser can't open it (Chrome can't open iPhone HEIC photos) — send the original and let Google Drive convert it
+    const kind = await sniffImageType(file).catch(() => 'unknown');
+    if (kind === 'empty') throw new Error(`“${file.name}” is empty — it may not have finished downloading. Save it again and retry.`);
+    if (kind === 'unknown') throw new Error(`“${file.name}” isn’t a photo this can read (it may be damaged or only partly downloaded). Try opening it and exporting it as a JPG.`);
+    if (file.size > 9 * 1024 * 1024) throw new Error(`“${file.name}” is too large to convert (over 9 MB). Open it and export it as a JPG.`);
+    const res = await apiPost('admin_upload_image', { data: await fileToBase64(file), mimeType: 'image/' + kind, filename: `${base}.${kind}`, convert: true });
+    return res.url;
+  }
+  const res = await apiPost('admin_upload_image', { data, mimeType: 'image/jpeg', filename: base + '.jpg' });
   return res.url;
 }
 
@@ -427,15 +455,16 @@ function openProductEditor(id) {
     status.textContent = `Uploading ${files.length} photo${files.length > 1 ? 's' : ''}…`;
     m.$('#peSave').disabled = true;
     renderPhotos();
-    let failed = 0;
+    let failed = 0, lastErr = null;
     for (const f of files) {
       try { photos.push(await uploadPhoto(f)); }
-      catch (err) { failed++; console.error(err); if (err.code === 'unauthorized') handleApiError(err, 'Upload'); }
+      catch (err) { failed++; lastErr = err; console.error(err); if (err.code === 'unauthorized') handleApiError(err, 'Upload'); }
       uploading--;
       renderPhotos();
     }
     if (!webUploading) m.$('#peSave').disabled = false;
-    status.textContent = failed ? `⚠️ ${failed} photo${failed > 1 ? 's' : ''} didn’t upload. Check your connection and try again.` : '✅ Photos uploaded';
+    const why = lastErr && lastErr.code !== 'unauthorized' && !/fetch|network|load failed/i.test(lastErr.message) ? lastErr.message : 'Check your connection and try again.';
+    status.textContent = failed ? `⚠️ ${failed} photo${failed > 1 ? 's' : ''} didn’t upload. ${why}` : '✅ Photos uploaded';
     if (!failed) setTimeout(() => { status.hidden = true; }, 2500);
   }
 
