@@ -540,9 +540,11 @@ function renderInventory() {
     const issues = invIssues(p);
     const imgJob = typeof imageJobs !== 'undefined' && imageJobs.has(p.id);
     const priceJob = typeof priceJobs !== 'undefined' && priceJobs.has(p.id);
+    const specJob = typeof specJobs !== 'undefined' && specJobs.has(p.id);
     const tags = [
       p.draft ? '<span class="inv-flag draft" title="Hidden from the website until you publish it">Draft</span>' : '',
       ...issues.map(([t, why]) => t === 'No web image' && imgJob ? '<span class="inv-flag busy">Finding image…</span>' : `<span class="inv-flag" title="${esc(why)}">${t}</span>`),
+      specJob ? '<span class="inv-flag busy">Looking up specs…</span>' : p.specsNote ? `<span class="inv-flag" title="${esc(p.specsNote)}">Specs not found</span>` : '',
     ].join('');
     return `<tr class="${Number(p.stock) <= 0 ? 'faded' : ''}">
       <td class="c-thumb"><button class="inv-thumb" onclick="openProductEditor('${id}')" title="Edit / add photos">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : ic('camera')}</button></td>
