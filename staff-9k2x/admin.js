@@ -425,55 +425,203 @@ function deleteRepair(ticketId) {
 }
 
 // ─── INVENTORY ───
+// ─── INVENTORY: tabs + filters ───
+const INV_TABS = [
+  ['instock', 'In stock'], ['live', 'Live on site'], ['drafts', 'Drafts'],
+  ['attention', 'Needs attention'], ['soldout', 'Sold out'], ['all', 'All'],
+];
+const INV_SORTS = [
+  ['newest', 'Newest first'], ['name', 'Name A–Z'], ['price-desc', 'Price: high to low'], ['price-asc', 'Price: low to high'],
+  ['category', 'Group by type'], ['brand', 'Group by brand'], ['location', 'Group by location'],
+];
+const INV_DEFAULT = { tab: 'instock', category: '', brand: '', condition: '', location: '', sort: 'newest' };
+let invFilter = (() => {
+  try { return { ...INV_DEFAULT, ...JSON.parse(localStorage.getItem('oa_inv_filter') || '{}') }; } catch { return { ...INV_DEFAULT }; }
+})();
+function setInvFilter(key, value) {
+  invFilter[key] = value;
+  try { localStorage.setItem('oa_inv_filter', JSON.stringify(invFilter)); } catch {}
+  renderInventory();
+}
+function clearInvFilters() {
+  invFilter = { ...INV_DEFAULT, tab: invFilter.tab, sort: invFilter.sort };
+  const s = document.getElementById('inventorySearch'); if (s) s.value = '';
+  setInvFilter('tab', invFilter.tab);
+}
+function categoryLabel(c) {
+  const hit = (typeof CATEGORY_OPTIONS !== 'undefined' ? CATEGORY_OPTIONS : []).find(([v]) => v === c);
+  return hit ? hit[1] : (c ? c[0].toUpperCase() + c.slice(1) : 'No type');
+}
+const locKey = l => String(l || '').trim().toLowerCase();
+// What still needs doing before an item is ready to sell
+function invIssues(p) {
+  const out = [];
+  if (!(Number(p.price) > 0)) out.push(['No price', 'Set a price before it can be sold on the website']);
+  if (!String(p.imageUrl || '').trim()) out.push(['No web image', p.imageSearchNote || 'Customers see an icon until it has a website image']);
+  else if (p.imagesAutoPicked) out.push(['Check images', 'Website images were picked automatically — open the item to review them']);
+  if (!String(p.model || '').trim()) out.push(['No model #', 'Add the model number for accurate details and pricing']);
+  if (!String(p.storageLocation || '').trim()) out.push(['No location', 'Add where it is stored']);
+  return out;
+}
+function invInTab(p, tab) {
+  const inStock = Number(p.stock) > 0;
+  switch (tab) {
+    case 'instock': return inStock;
+    case 'live': return inStock && !p.draft;
+    case 'drafts': return inStock && !!p.draft;
+    case 'attention': return inStock && invIssues(p).length > 0;
+    case 'soldout': return !inStock;
+    default: return true;
+  }
+}
+
 function renderInventory() {
+  const f = invFilter;
   const q = searchValue('inventorySearch');
-  const all      = getInventory().filter(p => matches(p, q, ['id', 'name', 'brand', 'model', 'category', 'condition', 'storageLocation']));
-  const inStock  = all.filter(p => p.stock > 0).sort((a,b) => String(a.name).localeCompare(String(b.name)));
-  const outStock = all.filter(p => !(p.stock > 0));
+  const inv = getInventory();
+  // Everything except the tab, so the tab counts match the other filters
+  const filtered = inv.filter(p =>
+    (!q || matches(p, q, ['id', 'name', 'brand', 'model', 'category', 'condition', 'storageLocation'])) &&
+    (!f.category || p.category === f.category) &&
+    (!f.brand || String(p.brand || '').trim().toLowerCase() === f.brand) &&
+    (!f.condition || p.condition === f.condition) &&
+    (!f.location || (f.location === '-' ? !locKey(p.storageLocation) : locKey(p.storageLocation) === f.location)));
+  const list = filtered.filter(p => invInTab(p, f.tab));
+
+  // Tabs
+  document.getElementById('invTabs').innerHTML = INV_TABS.map(([key, label]) => {
+    const n = filtered.filter(p => invInTab(p, key)).length;
+    return `<button type="button" role="tab" class="inv-tab ${key === f.tab ? 'on' : ''} ${key === 'attention' && n ? 'warn' : ''}" aria-selected="${key === f.tab}" onclick="setInvFilter('tab','${key}')">${label}<span>${n}</span></button>`;
+  }).join('');
+
+  // Filter menus (options come from what's in the inventory)
+  const tally = (key, norm = v => v) => {
+    const m = new Map();
+    inv.forEach(p => { const raw = String(p[key] || '').trim(); if (!raw) return; const k = norm(raw); if (!m.has(k)) m.set(k, { label: raw, n: 0 }); m.get(k).n++; });
+    return [...m.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+  };
+  const sel = (key, allLabel, opts) => `<label class="inv-select ${f[key] ? 'on' : ''}"><span class="sr-only">${allLabel}</span>
+    <select onchange="setInvFilter('${key}', this.value)"><option value="">${allLabel}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === f[key] ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+  const noLoc = inv.filter(p => !locKey(p.storageLocation)).length;
+  document.getElementById('invSelects').innerHTML =
+    sel('category', 'All types', tally('category').map(([k, v]) => [k, `${categoryLabel(k)} (${v.n})`])) +
+    sel('brand', 'All brands', tally('brand', v => v.toLowerCase()).map(([k, v]) => [k, `${v.label} (${v.n})`])) +
+    sel('condition', 'Any condition', (typeof CONDITIONS !== 'undefined' ? CONDITIONS : []).filter(c => inv.some(p => p.condition === c)).map(c => [c, c])) +
+    sel('location', 'All locations', [...tally('storageLocation', locKey).map(([k, v]) => [k, `${v.label} (${v.n})`]), ...(noLoc ? [['-', `No location (${noLoc})`]] : [])]) +
+    `<label class="inv-select sort"><span class="sr-only">Sort</span><select onchange="setInvFilter('sort', this.value)">${INV_SORTS.map(([v, l]) => `<option value="${v}" ${v === f.sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
+  const active = ['category', 'brand', 'condition', 'location'].filter(k => f[k]).length + (q ? 1 : 0);
+  document.getElementById('invClear').hidden = !active;
+  const badge = document.getElementById('invFilterCount');
+  if (badge) { badge.textContent = active; badge.hidden = !active; }
+
+  // Summary
+  const inStock = inv.filter(p => Number(p.stock) > 0);
+  const units = inStock.reduce((t, p) => t + (Number(p.stock) || 0), 0);
+  const value = inStock.reduce((t, p) => t + (Number(p.price) || 0) * (Number(p.stock) || 0), 0);
+  document.getElementById('invSummary').textContent =
+    `${inStock.length} item${inStock.length === 1 ? '' : 's'} in stock · ${units} unit${units === 1 ? '' : 's'} · $${Math.round(value).toLocaleString('en-US')} at asking price`;
+
+  // Sort / group
+  const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+  const sorters = {
+    newest: (a, b) => String(b.createdAt || b.id).localeCompare(String(a.createdAt || a.id)),
+    name: byName,
+    'price-desc': (a, b) => (Number(b.price) || 0) - (Number(a.price) || 0),
+    'price-asc': (a, b) => (Number(a.price) || 0) - (Number(b.price) || 0),
+  };
+  const groupBy = { category: p => categoryLabel(p.category), brand: p => String(p.brand || '').trim() || 'No brand', location: p => String(p.storageLocation || '').trim() || 'No location' }[f.sort];
+  // In "All", sold-out items go last
+  const stockFirst = (a, b) => (Number(b.stock) > 0) - (Number(a.stock) > 0);
+  const rows = [...list].sort((a, b) => stockFirst(a, b) || (sorters[f.sort] || byName)(a, b));
 
   function row(p) {
     const id = esc(p.id);
     const img = String(p.imageUrl || '').split(/[\s,]+/).filter(Boolean)[0] || String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean)[0];
-    const noWeb = !String(p.imageUrl || '').trim();
-    return `<tr class="${p.stock <= 0 ? 'faded' : ''}">
+    const issues = invIssues(p);
+    const imgJob = typeof imageJobs !== 'undefined' && imageJobs.has(p.id);
+    const priceJob = typeof priceJobs !== 'undefined' && priceJobs.has(p.id);
+    const tags = [
+      p.draft ? '<span class="inv-flag draft" title="Hidden from the website until you publish it">Draft</span>' : '',
+      ...issues.map(([t, why]) => t === 'No web image' && imgJob ? '<span class="inv-flag busy">Finding image…</span>' : `<span class="inv-flag" title="${esc(why)}">${t}</span>`),
+    ].join('');
+    return `<tr class="${Number(p.stock) <= 0 ? 'faded' : ''}">
       <td class="c-thumb"><button class="inv-thumb" onclick="openProductEditor('${id}')" title="Edit / add photos">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : ic('camera')}</button></td>
       <td class="wrap c-name">
-        <div style="font-weight:600;color:var(--navy)">${esc(p.name)}${p.draft ? ' <span class="draft-tag" title="Hidden from the website until you publish it">Draft</span>' : ''}${p.imagesAutoPicked ? ' <span class="draft-tag img" title="Website images were picked automatically — open to review">Check images</span>' : ''}${noWeb ? ` <span class="draft-tag img${imageJobs.has(p.id) ? ' busy' : ''}" title="${esc(p.imageSearchNote || 'No website image yet — customers see an icon. Images are looked for automatically.')}">${imageJobs.has(p.id) ? 'Finding image…' : 'No web image'}</span>` : ''}</div>
-        <div style="font-size:.74rem;color:var(--gray-mid)">${esc([p.brand, p.category, p.model].filter(Boolean).join(' · '))}</div>
+        <button class="inv-name" onclick="openProductEditor('${id}')">${esc(p.name || 'Untitled')}</button>
+        <div class="inv-meta">${esc([p.brand, categoryLabel(p.category), p.model && '#' + p.model].filter(Boolean).join(' · '))}</div>
+        ${tags ? `<div class="inv-flags">${tags}</div>` : ''}
       </td>
-      <td class="c-cond"><span class="cond-tag ${(p.condition||'').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>
-      <td class="c-loc" style="color:var(--gray-dark)">${esc(p.storageLocation) || '—'}</td>
-      <td class="c-price" data-label="Price $"><input type="number" inputmode="decimal" id="price_${id}" value="${esc(p.price)}" data-orig="${esc(p.price)}" min="0" class="mini-input inv-edit" style="width:84px" />${priceJobs.has(p.id) ? '<div class="inv-range busy">Researching price…</div>' : p.priceResearch && p.priceResearch.low ? `<div class="inv-range" title="Suggested $${p.priceResearch.suggested} · MSRP $${p.priceResearch.msrp || '—'} · researched ${esc(new Date(p.priceResearch.at).toLocaleDateString())}">Range $${p.priceResearch.low}–${p.priceResearch.high}</div>` : p.priceResearchNote ? `<div class="inv-range none" title="${esc(p.priceResearchNote)}">No price data</div>` : ''}</td>
+      <td class="c-cond"><span class="cond-tag ${(p.condition || '').startsWith('New') ? 'new' : ''}">${esc(p.condition || '—')}</span></td>
+      <td class="c-loc">${esc(p.storageLocation) || '<span class="muted">—</span>'}</td>
+      <td class="c-price" data-label="Price $"><input type="number" inputmode="decimal" id="price_${id}" value="${esc(p.price)}" data-orig="${esc(p.price)}" min="0" class="mini-input inv-edit" style="width:84px" aria-label="Price for ${esc(p.name)}" />${priceJob ? '<div class="inv-range busy">Researching…</div>' : p.priceResearch && p.priceResearch.low ? `<div class="inv-range" title="Suggested $${p.priceResearch.suggested} · MSRP $${p.priceResearch.msrp || '—'} · researched ${esc(new Date(p.priceResearch.at).toLocaleDateString())}">$${p.priceResearch.low}–${p.priceResearch.high}</div>` : p.priceResearchNote ? `<div class="inv-range none" title="${esc(p.priceResearchNote)}">No price data</div>` : ''}</td>
       <td class="c-stock" data-label="Stock">
         <div class="stepper">
           <button onclick="adjustStock('${id}',-1)" aria-label="Less">${ic('minus')}</button>
-          <input type="number" inputmode="numeric" id="stock_${id}" value="${esc(p.stock)}" data-orig="${esc(p.stock)}" min="0" class="mini-input inv-edit" />
+          <input type="number" inputmode="numeric" id="stock_${id}" value="${esc(p.stock)}" data-orig="${esc(p.stock)}" min="0" class="mini-input inv-edit" aria-label="Stock for ${esc(p.name)}" />
           <button onclick="adjustStock('${id}',1)" aria-label="More">${ic('plus')}</button>
         </div>
       </td>
       <td class="row-actions c-act">
-        <button class="card-btn small" onclick="saveInventoryRow('${id}')">Save</button>
         <button class="action-btn" onclick="openProductEditor('${id}')" title="Edit details & photos">${ic('edit')}</button>
         <button class="action-btn" onclick="openListing('${id}')" title="Marketplace listing">${ic('megaphone')}</button>
-        <button class="action-btn" onclick="openRecordSale('${id}')" title="Record a sale" ${p.stock <= 0 ? 'disabled' : ''}>${ic('dollar')}</button>
+        <button class="action-btn" onclick="openRecordSale('${id}')" title="Record a sale" ${Number(p.stock) <= 0 ? 'disabled' : ''}>${ic('dollar')}</button>
         <button class="action-btn danger" onclick="removeProduct('${id}')" title="Remove">${ic('trash')}</button>
       </td>
     </tr>`;
   }
 
-  const sectionHeader = (label, count, color) =>
-    `<tr><td colspan="7" class="section-row" style="background:${color}">${label} (${count})</td></tr>`;
-
   let html = '';
-  if (inStock.length)  html += sectionHeader('In stock', inStock.length, '#1a7fc1') + inStock.map(row).join('');
-  if (outStock.length) html += sectionHeader('Sold out', outStock.length, '#7f8c8d') + outStock.map(row).join('');
-  if (!all.length) html = `<tr><td colspan="7" class="empty-row">${q ? 'No products match your search.' : 'No products yet.<br><small>Click “Add Product” to list your first appliance.</small>'}</td></tr>`;
+  if (groupBy) {
+    const groups = new Map(); // "Ramona" and "ramona" are the same place
+    rows.forEach(p => { const g = groupBy(p), k = g.toLowerCase(); if (!groups.has(k)) groups.set(k, { label: g, items: [] }); const grp = groups.get(k); grp.items.push(p); if (/^[a-z]/.test(grp.label) && /^[A-Z]/.test(g)) grp.label = g; });
+    [...groups.values()].sort((a, b) => a.label.localeCompare(b.label)).forEach(({ label, items }) => {
+      html += `<tr class="group-row"><td colspan="7">${esc(label)} <span>${items.length}</span></td></tr>` + items.sort(byName).map(row).join('');
+    });
+  } else html = rows.map(row).join('');
+  if (!rows.length) {
+    const msg = !inv.length ? 'No products yet.<br><small>Use “Bulk add” or “Add product” to list your first appliance.</small>'
+      : active ? 'Nothing matches these filters. <button class="link-btn" onclick="clearInvFilters()">Clear filters</button>'
+      : f.tab === 'attention' ? '🎉 Nothing needs attention — every in-stock item has a price, a website image, a model number and a location.'
+      : 'Nothing here.';
+    html = `<tr><td colspan="7" class="empty-row">${msg}</td></tr>`;
+  }
   document.getElementById('inventoryTbody').innerHTML = html;
+  updateInvSaveBar();
+}
+
+// Unsaved price / stock edits: a bar at the bottom offers to save them all
+function updateInvSaveBar() {
+  const bar = document.getElementById('invSaveBar');
+  if (!bar) return;
+  const n = inventoryEdits().length;
+  bar.hidden = !n;
+  bar.querySelector('[data-count]').textContent = `${n} unsaved change${n === 1 ? '' : 's'}`;
+}
+document.addEventListener('input', e => { if (e.target.closest?.('#inventoryTbody')) updateInvSaveBar(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.closest?.('#inventoryTbody .inv-edit')) { e.preventDefault(); saveAllInventory(); }
+});
+function discardInventoryEdits() { renderInventory(); showAdminToast('Changes discarded'); }
+function toggleInvMenu(force) {
+  const menu = document.getElementById('invMenu'), btn = document.getElementById('invMenuBtn');
+  const open = force !== undefined ? force : menu.hidden;
+  menu.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+}
+document.addEventListener('click', e => {
+  const menu = document.getElementById('invMenu');
+  if (menu && !menu.hidden && !e.target.closest('.inv-more')) toggleInvMenu(false);
+  if (e.target.closest('#invMenu button')) toggleInvMenu(false);
+});
+function toggleInvFilters() {
+  const box = document.getElementById('invFilterBox');
+  box.classList.toggle('open');
+  document.getElementById('invFilterBtn').setAttribute('aria-expanded', String(box.classList.contains('open')));
 }
 
 function adjustStock(productId, delta) {
   const input = document.getElementById('stock_' + productId);
   input.value = Math.max(0, (parseInt(input.value) || 0) + delta);
+  updateInvSaveBar();
 }
 
 // Unsaved edits in the Inventory table: { id, price?, stock?, expectStock } for rows that changed
