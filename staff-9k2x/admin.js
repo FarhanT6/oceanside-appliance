@@ -134,7 +134,7 @@ async function pullFromSheets({ silent = false, force = false } = {}) {
   pulling = true;
   const seqAtStart = writeSeq;
   const btn = document.getElementById('syncBtn');
-  if (btn && !silent) { btn.textContent = '⏳ Refreshing…'; btn.disabled = true; }
+  if (btn && !silent) { btn.innerHTML = `${ic('refresh')} Refreshing…`; btn.disabled = true; }
   try {
     const { data } = await apiPost('admin_pull');
     if (writeSeq !== seqAtStart) { pullAgain = true; return; } // a save happened meanwhile — this data is already stale
@@ -166,7 +166,7 @@ async function pullFromSheets({ silent = false, force = false } = {}) {
     handleApiError(e, 'Refresh');
   } finally {
     pulling = false;
-    if (btn) { btn.textContent = '🔄 Refresh'; btn.disabled = false; }
+    if (btn) { btn.innerHTML = `${ic('refresh')} Refresh`; btn.disabled = false; }
     if (pullAgain) { pullAgain = false; setTimeout(() => pullFromSheets({ silent: true }), 1500); }
   }
 }
@@ -179,7 +179,7 @@ function showTab(tabName) {
   document.getElementById('tab-' + tabName)?.classList.add('active');
   document.querySelector(`[data-tab="${tabName}"]`)?.classList.add('active');
 
-  const titles = { dashboard: 'Dashboard', sales: 'Sales', repairs: 'Repair Requests', inventory: 'Inventory', ledger: 'Ledger' };
+  const titles = { dashboard: 'Today', sales: 'Sales', repairs: 'Repairs', inventory: 'Inventory', ledger: 'Ledger' };
   document.getElementById('pageTitle').textContent = titles[tabName] || tabName;
 
   renderTab(tabName);
@@ -194,51 +194,89 @@ function renderTab(tab) {
 }
 
 // ─── DASHBOARD ───
+function openSalesTab(tab) { salesFilter.tab = tab; showTab('sales'); }
+function openRepairsTab(tab) { repairsFilter.tab = tab; showTab('repairs'); }
+function openInventoryTab(tab) { invFilter.tab = tab; showTab('inventory'); }
+function money0(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('en-US'); }
+function statusDot(status) {
+  const st = String(status || 'pending');
+  return `<span class="status-dot ${esc(st.toLowerCase().replace(/\s+/g, ''))}">${esc(st)}</span>`;
+}
+
 function renderDashboard() {
   const sales   = getSales();
   const repairs = getRepairs();
   const inv     = getInventory();
+  const now = new Date();
+  const thisMonth = s => { const d = new Date(s.timestamp); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); };
 
-  const revenue = sales.filter(o => o.status === 'completed').reduce((s, o) => s + (o.total || 0), 0);
-  document.getElementById('kpi-revenue').textContent  = '$' + revenue.toLocaleString('en-US', { maximumFractionDigits: 0 });
-  document.getElementById('kpi-orders').textContent   = sales.filter(o => o.status === 'pending').length;
-  document.getElementById('kpi-repairs').textContent  = repairs.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled').length;
-  document.getElementById('kpi-lowstock').textContent = inv.filter(i => i.stock <= 0).length;
-  const setSub = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-  setSub('kpi-orders-sub', `${sales.length} order${sales.length !== 1 ? 's' : ''} total`);
-  setSub('kpi-repairs-sub', `${repairs.length} request${repairs.length !== 1 ? 's' : ''} total`);
-  setSub('kpi-lowstock-sub', `${inv.length} product${inv.length !== 1 ? 's' : ''} listed`);
+  const monthSales = sales.filter(o => o.status === 'completed' && thisMonth(o));
+  const openOrders = sales.filter(o => o.status === 'pending');
+  const openRepairs = repairs.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled');
+  const newRepairs = repairs.filter(r => (r.status || 'New') === 'New');
+  const inStock = inv.filter(p => Number(p.stock) > 0);
+  const attention = inStock.filter(p => invIssues(p).length);
+  const drafts = inStock.filter(p => p.draft);
+  const views = getViewRequests().filter(v => (v.status || 'New') === 'New');
+  const followups = getStore('followups').filter(f => f.status === 'open');
 
-  const recentSales = [...sales].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
-  document.getElementById('recentSalesTbody').innerHTML = recentSales.map(s => `
-    <tr>
-      <td><strong>${esc(s.orderId)}</strong></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.items)}">${esc(s.items)}</td>
-      <td><strong>$${(s.total||0).toLocaleString()}</strong></td>
-      <td>${formatDate(s.timestamp)}</td>
-      <td><span class="status-badge ${esc(s.status)}">${esc(s.status)}</span></td>
-    </tr>
-  `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No sales yet</td></tr>';
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  set('kpi-revenue', money0(monthSales.reduce((t, o) => t + (o.total || 0), 0)));
+  set('kpi-revenue-sub', `${monthSales.length} sale${monthSales.length === 1 ? '' : 's'} in ${now.toLocaleString('en-US', { month: 'long' })}`);
+  set('kpi-orders', openOrders.length);
+  set('kpi-orders-sub', openOrders.length ? `${money0(openOrders.reduce((t, o) => t + (o.total || 0), 0))} waiting to be confirmed` : 'Nothing waiting');
+  set('kpi-repairs', openRepairs.length);
+  set('kpi-repairs-sub', newRepairs.length ? `${newRepairs.length} new — not scheduled yet` : 'All scheduled');
+  set('kpi-lowstock', inStock.length);
+  set('kpi-lowstock-sub', `${inv.length - inStock.length} sold out · ${drafts.length} draft${drafts.length === 1 ? '' : 's'}`);
+
+  // Sidebar counts: things waiting on you
+  set('navCountSales', openOrders.length || '');
+  set('navCountRepairs', newRepairs.length || '');
+  set('navCountInventory', attention.length || '');
+
+  // To do
+  const todo = [
+    [openOrders.length, 'Orders to confirm', openOrders.slice(0, 2).map(o => `${o.firstName || ''} ${o.lastName || ''}`.trim() || o.orderId).join(', '), "openSalesTab('open')"],
+    [newRepairs.length, 'New repair requests to schedule', newRepairs.slice(0, 2).map(r => `${r.firstName || ''} · ${r.applianceType || ''}`).join(', '), "openRepairsTab('new')"],
+    [views.length, 'Viewing requests to call back', views.slice(0, 2).map(v => v.name).filter(Boolean).join(', '), "document.getElementById('viewRequestsCard').scrollIntoView({behavior:'smooth'})"],
+    [followups.length, 'Follow-ups ready to send', followups.slice(0, 2).map(f => f.customer).filter(Boolean).join(', '), "document.getElementById('followupsCard').scrollIntoView({behavior:'smooth'})"],
+    [attention.length, 'Items that need attention', 'Missing a price, website image, model # or location', "openInventoryTab('attention')"],
+    [drafts.length, 'Drafts not on the website yet', 'Check the details, then tick “Show on the website”', "openInventoryTab('drafts')"],
+  ].filter(([n]) => n > 0);
+  const list = document.getElementById('todoList');
+  if (list) list.innerHTML = todo.map(([n, title, sub, go]) => `
+    <li class="todo-item" onclick="${go}" role="button" tabindex="0" onkeydown="if(event.key==='Enter')this.click()">
+      <span class="todo-n">${n}</span>
+      <span class="todo-text"><strong>${esc(title)}</strong>${sub ? `<span>${esc(sub)}</span>` : ''}</span>
+      <span class="todo-go">${ic('arrow-right')}</span>
+    </li>`).join('') || `<li class="todo-done">${ic('check-circle')} All caught up.</li>`;
+
+  const recentSales = [...sales].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
+  document.getElementById('recentSalesTbody').innerHTML = recentSales.map(o => `
+    <tr class="clickable" onclick="openOrderDetail('${esc(o.orderId)}')">
+      <td><strong>${esc(`${o.firstName || ''} ${o.lastName || ''}`.trim() || o.orderId)}</strong><br><small>${esc(o.orderId)} · ${formatDate(o.timestamp)}</small></td>
+      <td class="wrap" style="max-width:200px">${esc(o.items)}</td>
+      <td>${money0(o.total)}</td>
+      <td>${statusDot(o.status)}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty-row">No sales yet</td></tr>';
 
   renderViewRequests();
   renderFollowups();
 
-  const recentRepairs = [...repairs].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
-  document.getElementById('recentRepairsTbody').innerHTML = recentRepairs.map(r => `
-    <tr>
-      <td><strong>${esc(r.ticketId)}</strong></td>
+  const queue = [...openRepairs].sort((a, b) => new Date(a.scheduledFor || a.timestamp) - new Date(b.scheduledFor || b.timestamp)).slice(0, 5);
+  document.getElementById('recentRepairsTbody').innerHTML = queue.map(r => `
+    <tr class="clickable" onclick="openRepairDetail('${esc(r.ticketId)}')">
+      <td><strong>${esc(r.ticketId)}</strong><br><small>${r.scheduledFor ? 'Visit ' + formatDate(r.scheduledFor) : 'Requested ' + formatDate(r.timestamp)}</small></td>
       <td>${esc(r.firstName)} ${esc(r.lastName)}</td>
       <td style="text-transform:capitalize">${esc(r.applianceType)}</td>
-      <td>${typeTag(r.requestType)}</td>
-      <td><span class="status-badge ${esc((r.status||'').toLowerCase().replace(' ',''))}">${esc(r.status)}</span></td>
-    </tr>
-  `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No repair requests yet</td></tr>';
+      <td>${statusDot(r.status || 'New')}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="empty-row">No open repairs</td></tr>';
 }
 
 function typeTag(t) {
   t = t || 'Repair';
-  const color = t === 'Sell to us' ? '#8e44ad' : t === 'Other' ? '#7f8c8d' : '#1a7fc1';
-  return `<span style="display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.68rem;font-weight:700;color:${color};background:${color}1a">${esc(t)}</span>`;
+  return `<span class="type-tag">${esc(t)}</span>`;
 }
 
 // ─── VIEWING REQUESTS ───
@@ -249,14 +287,14 @@ function renderViewRequests() {
   const tbody = document.getElementById('viewRequestsTbody');
   if (!tbody) return;
   tbody.innerHTML = reqs.map(r => `<tr>
-    <td style="font-size:.78rem">${formatDate(r.timestamp)}</td>
-    <td><strong>${esc(r.name)||'—'}</strong></td>
-    <td><a href="tel:${esc(r.phone)}" style="color:inherit">${esc(r.phone)||'—'}</a></td>
-    <td style="font-size:.8rem">${esc(r.email)||'—'}</td>
-    <td style="font-size:.82rem">${esc(r.appliance)||'—'}${r.brand?' · '+esc(r.brand):''}</td>
-    <td style="font-size:.78rem;color:var(--gray-mid)">${esc(r.preferredTime)||'—'}</td>
-    <td><select class="status-select" onchange="updateViewStatus('${esc(r.requestId)}', this.value)">${['New', 'Contacted', 'Done'].map(st => `<option ${(r.status || 'New') === st ? 'selected' : ''}>${st}</option>`).join('')}</select></td>
-  </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--gray-mid);padding:1.5rem">No viewing requests yet.</td></tr>';
+    <td data-label="Date"><small>${formatDate(r.timestamp)}</small></td>
+    <td data-label="Name"><strong>${esc(r.name)||'—'}</strong></td>
+    <td data-label="Phone"><a href="tel:${esc(r.phone)}">${esc(r.phone)||'—'}</a></td>
+    <td data-label="Email">${esc(r.email)||'—'}</td>
+    <td data-label="Appliance" class="wrap">${esc(r.appliance)||'—'}${r.brand?' · '+esc(r.brand):''}</td>
+    <td data-label="Best time"><small>${esc(r.preferredTime)||'—'}</small></td>
+    <td data-label="Status"><select class="status-select" onchange="updateViewStatus('${esc(r.requestId)}', this.value)">${['New', 'Contacted', 'Done'].map(st => `<option ${(r.status || 'New') === st ? 'selected' : ''}>${st}</option>`).join('')}</select></td>
+  </tr>`).join('') || '<tr><td colspan="7" class="empty-row">No viewing requests yet.</td></tr>';
 }
 
 function updateViewStatus(requestId, status) {
@@ -280,26 +318,45 @@ function clearViewRequests() {
 // ─── SALES ───
 const CHANNEL_LABEL = { Website: 'Website', 'In store': 'In store', OfferUp: 'OfferUp', 'Facebook Marketplace': 'Facebook', Craigslist: 'Craigslist', Other: 'Other' };
 
+const SALES_TABS = [['open', 'Open'], ['completed', 'Completed'], ['cancelled', 'Cancelled'], ['all', 'All']];
+let salesFilter = { tab: 'open', channel: '' };
+function setSalesFilter(k, v) { salesFilter[k] = v; renderSales(); }
+function saleInTab(s, tab) { return tab === 'all' || (tab === 'open' ? s.status !== 'completed' && s.status !== 'cancelled' : s.status === tab); }
+
 function renderSales() {
   const q = searchValue('salesSearch');
-  const all = getSales()
+  const f = salesFilter;
+  const sales = getSales();
+  const filtered = sales
     .filter(s => matches(s, q, ['orderId', 'firstName', 'lastName', 'phone', 'email', 'items', 'channel', 'address']))
-    .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-  const active = all.filter(s => s.status !== 'completed' && s.status !== 'cancelled');
-  const done   = all.filter(s => s.status === 'completed' || s.status === 'cancelled');
+    .filter(s => !f.channel || (s.channel || 'Website') === f.channel)
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const list = filtered.filter(s => saleInTab(s, f.tab));
 
-  function row(s, faded) {
-    const statusColor = s.status === 'pending' ? '#e67e22' : s.status === 'completed' ? '#27ae60' : '#c0392b';
+  document.getElementById('salesTabs').innerHTML = SALES_TABS.map(([k, label]) => {
+    const n = filtered.filter(s => saleInTab(s, k)).length;
+    return `<button type="button" role="tab" class="inv-tab ${k === f.tab ? 'on' : ''} ${k === 'open' && n ? 'warn' : ''}" aria-selected="${k === f.tab}" onclick="setSalesFilter('tab','${k}')">${label}<span>${n}</span></button>`;
+  }).join('');
+  const channels = [...new Set(sales.map(s => s.channel || 'Website'))].sort();
+  document.getElementById('salesSelects').innerHTML = `<label class="inv-select ${f.channel ? 'on' : ''}"><span class="sr-only">Channel</span>
+    <select onchange="setSalesFilter('channel', this.value)"><option value="">All channels</option>${channels.map(c => `<option value="${esc(c)}" ${c === f.channel ? 'selected' : ''}>${esc(CHANNEL_LABEL[c] || c)}</option>`).join('')}</select></label>`;
+  const now = new Date();
+  const month = sales.filter(s => s.status === 'completed' && new Date(s.timestamp).getMonth() === now.getMonth() && new Date(s.timestamp).getFullYear() === now.getFullYear());
+  document.getElementById('salesSummary').textContent =
+    `${sales.filter(s => saleInTab(s, 'open')).length} open · ${money0(month.reduce((t, s) => t + (s.total || 0), 0))} completed in ${now.toLocaleString('en-US', { month: 'long' })}`;
+
+  const html = list.map(s => {
     const id = esc(s.orderId);
     const who = `${s.firstName || ''} ${s.lastName || ''}`.trim();
-    return `<tr class="clickable${faded ? ' faded' : ''}" onclick="if(!event.target.closest('select,button,a'))openOrderDetail('${id}')">
-      <td><strong>${id}</strong><br><small style="color:var(--gray-mid)">${esc(who) || '—'}${s.phone ? ` · <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ''}</small></td>
-      <td class="wrap" title="${esc(s.items)}">${esc(s.items)}</td>
-      <td><strong>$${(s.total||0).toLocaleString()}</strong></td>
-      <td>${esc(CHANNEL_LABEL[s.channel] || s.channel || 'Website')}</td>
-      <td>${formatDate(s.timestamp)}</td>
-      <td>
-        <select onchange="updateSaleStatus('${id}', this.value)" class="status-select" style="color:${statusColor}">
+    const faded = s.status === 'completed' || s.status === 'cancelled';
+    return `<tr class="clickable${faded && f.tab === 'all' ? ' faded' : ''}" onclick="if(!event.target.closest('select,button,a'))openOrderDetail('${id}')">
+      <td data-label="Order"><strong>${esc(who) || id}</strong><br><small>${id}${s.phone ? ` · <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ''}</small></td>
+      <td data-label="Items" class="wrap">${esc(s.items)}</td>
+      <td data-label="Total"><strong>${money0(s.total)}</strong></td>
+      <td data-label="Channel">${esc(CHANNEL_LABEL[s.channel] || s.channel || 'Website')}</td>
+      <td data-label="Date"><small>${formatDate(s.timestamp)}</small></td>
+      <td data-label="Status">
+        <select onchange="updateSaleStatus('${id}', this.value)" class="status-select st-${esc(s.status || 'pending')}">
           ${['pending','completed','cancelled'].map(st => `<option ${s.status===st?'selected':''}>${st}</option>`).join('')}
         </select>
       </td>
@@ -308,19 +365,11 @@ function renderSales() {
         <button class="action-btn danger" onclick="deleteSale('${id}')" title="Delete">${ic('trash')}</button>
       </td>
     </tr>`;
-  }
-
-  const sectionHeader = (label, count, color) =>
-    `<tr><td colspan="7" class="section-row" style="background:${color}">${label} (${count})</td></tr>`;
-
-  let html = '';
-  if (active.length) html += sectionHeader('Needs attention', active.length, '#e67e22') + active.map(s => row(s, false)).join('');
-  if (done.length)   html += sectionHeader('Completed / cancelled', done.length, '#7f8c8d') + done.map(s => row(s, true)).join('');
-  if (!all.length) {
-    html = q ? '<tr><td colspan="7" class="empty-row">No sales match your search.</td></tr>'
-             : '<tr><td colspan="7" class="empty-row">No orders yet.<br><small>Website orders appear here automatically. Use “Record Sale” for in-store or marketplace sales.</small></td></tr>';
-  }
-  document.getElementById('salesTbody').innerHTML = html;
+  }).join('');
+  document.getElementById('salesTbody').innerHTML = html || `<tr><td colspan="7" class="empty-row">${
+    !sales.length ? 'No orders yet.<br><small>Website orders appear here automatically. Use “Record sale” for in-store or marketplace sales.</small>'
+    : q || f.channel ? 'Nothing matches. <button class="link-btn" onclick="document.getElementById(\'salesSearch\').value=\'\';setSalesFilter(\'channel\',\'\')">Clear search</button>'
+    : f.tab === 'open' ? 'No open orders — all caught up.' : 'Nothing here.'}</td></tr>`;
   labelCells('salesTbody');
 }
 
@@ -364,27 +413,50 @@ function deleteSale(orderId) {
 }
 
 // ─── REPAIRS ───
+const REPAIR_TABS = [['active', 'Active'], ['new', 'New'], ['scheduled', 'Scheduled'], ['inprogress', 'In progress'], ['completed', 'Completed'], ['all', 'All']];
+let repairsFilter = { tab: 'active', appliance: '' };
+function setRepairsFilter(k, v) { repairsFilter[k] = v; renderRepairs(); }
+function repairInTab(r, tab) {
+  const st = (r.status || 'New').toLowerCase().replace(/\s+/g, '');
+  if (tab === 'all') return true;
+  if (tab === 'active') return st !== 'completed' && st !== 'cancelled';
+  return st === tab;
+}
+
 function renderRepairs() {
   const q = searchValue('repairsSearch');
-  const all = getRepairs()
+  const f = repairsFilter;
+  const repairs = getRepairs();
+  const filtered = repairs
     .filter(r => matches(r, q, ['ticketId', 'firstName', 'lastName', 'phone', 'email', 'address', 'applianceType', 'brand', 'description', 'assignedTo']))
-    .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-  const active = all.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled');
-  const done   = all.filter(r => r.status === 'Completed' || r.status === 'Cancelled');
+    .filter(r => !f.appliance || String(r.applianceType || '').toLowerCase() === f.appliance)
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const list = filtered.filter(r => repairInTab(r, f.tab));
 
-  function repairRow(r, faded) {
+  document.getElementById('repairsTabs').innerHTML = REPAIR_TABS.map(([k, label]) => {
+    const n = filtered.filter(r => repairInTab(r, k)).length;
+    return `<button type="button" role="tab" class="inv-tab ${k === f.tab ? 'on' : ''} ${k === 'new' && n ? 'warn' : ''}" aria-selected="${k === f.tab}" onclick="setRepairsFilter('tab','${k}')">${label}<span>${n}</span></button>`;
+  }).join('');
+  const types = [...new Set(repairs.map(r => String(r.applianceType || '').toLowerCase()).filter(Boolean))].sort();
+  document.getElementById('repairsSelects').innerHTML = `<label class="inv-select ${f.appliance ? 'on' : ''}"><span class="sr-only">Appliance</span>
+    <select onchange="setRepairsFilter('appliance', this.value)"><option value="">All appliances</option>${types.map(t => `<option value="${esc(t)}" ${t === f.appliance ? 'selected' : ''}>${esc(t[0].toUpperCase() + t.slice(1))}</option>`).join('')}</select></label>`;
+  const nNew = repairs.filter(r => repairInTab(r, 'new')).length, nActive = repairs.filter(r => repairInTab(r, 'active')).length;
+  document.getElementById('repairsSummary').textContent = `${nActive} active · ${nNew} new, not scheduled yet`;
+
+  const html = list.map(r => {
     const id = esc(r.ticketId);
     const desc = r.description || '';
-    return `<tr class="clickable${faded ? ' faded' : ''}" onclick="if(!event.target.closest('select,button,a'))openRepairDetail('${id}')">
-      <td><strong>${id}</strong><br><small style="color:var(--gray-mid)">${formatDate(r.timestamp)}</small></td>
-      <td>${esc(r.firstName)} ${esc(r.lastName)}<br><small style="color:var(--gray-mid)">${esc(r.address)}</small></td>
-      <td><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></td>
-      <td style="text-transform:capitalize">${esc(r.applianceType)}${r.brand ? `<br><small style="color:var(--gray-mid)">${esc(r.brand)}</small>` : ''}${r.requestType && r.requestType !== 'Repair' ? `<br>${typeTag(r.requestType)}` : ''}</td>
-      <td class="wrap" style="color:var(--gray-dark)">${r.aiTriage ? urgencyTag(r.aiTriage.urgency) + ' ' : ''}${esc(desc.substring(0, 70))}${desc.length > 70 ? '…' : ''}</td>
-      <td>${r.scheduledFor ? formatDate(r.scheduledFor) : '<span style="color:var(--gray-mid)">—</span>'}</td>
-      <td>
-        <select onchange="updateRepairStatus('${id}', this.value)" class="status-select">
-          ${['New','Scheduled','In Progress','Completed','Cancelled'].map(st => `<option ${r.status===st?'selected':''}>${st}</option>`).join('')}
+    const done = r.status === 'Completed' || r.status === 'Cancelled';
+    return `<tr class="clickable${done && f.tab === 'all' ? ' faded' : ''}" onclick="if(!event.target.closest('select,button,a'))openRepairDetail('${id}')">
+      <td data-label="Ticket"><strong>${id}</strong><br><small>${formatDate(r.timestamp)}</small></td>
+      <td data-label="Customer">${esc(r.firstName)} ${esc(r.lastName)}<br><small>${esc(r.address)}</small></td>
+      <td data-label="Phone"><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a></td>
+      <td data-label="Appliance" style="text-transform:capitalize">${esc(r.applianceType)}${r.brand ? `<br><small>${esc(r.brand)}</small>` : ''}${r.requestType && r.requestType !== 'Repair' ? `<br>${typeTag(r.requestType)}` : ''}</td>
+      <td data-label="Problem" class="wrap">${r.aiTriage ? urgencyTag(r.aiTriage.urgency) + ' ' : ''}${esc(desc.substring(0, 80))}${desc.length > 80 ? '…' : ''}</td>
+      <td data-label="Scheduled">${r.scheduledFor ? formatDate(r.scheduledFor) : '<span class="muted-sm">—</span>'}</td>
+      <td data-label="Status">
+        <select onchange="updateRepairStatus('${id}', this.value)" class="status-select st-${esc((r.status || 'New').toLowerCase().replace(/\s+/g, ''))}">
+          ${['New','Scheduled','In Progress','Completed','Cancelled'].map(st => `<option ${(r.status || 'New')===st?'selected':''}>${st}</option>`).join('')}
         </select>
       </td>
       <td class="row-actions">
@@ -392,16 +464,11 @@ function renderRepairs() {
         <button class="action-btn danger" onclick="deleteRepair('${id}')" title="Delete">${ic('trash')}</button>
       </td>
     </tr>`;
-  }
-
-  const sectionHeader = (label, count, color) =>
-    `<tr><td colspan="8" class="section-row" style="background:${color}">${label} (${count})</td></tr>`;
-
-  let html = '';
-  if (active.length) html += sectionHeader('Active', active.length, '#e67e22') + active.map(r => repairRow(r, false)).join('');
-  if (done.length)   html += sectionHeader('Completed / cancelled', done.length, '#7f8c8d') + done.map(r => repairRow(r, true)).join('');
-  if (!all.length) html = `<tr><td colspan="8" class="empty-row">${q ? 'No repair requests match your search.' : 'No repair requests yet.'}</td></tr>`;
-  document.getElementById('repairsTbody').innerHTML = html;
+  }).join('');
+  document.getElementById('repairsTbody').innerHTML = html || `<tr><td colspan="8" class="empty-row">${
+    !repairs.length ? 'No repair requests yet.'
+    : q || f.appliance ? 'Nothing matches. <button class="link-btn" onclick="document.getElementById(\'repairsSearch\').value=\'\';setRepairsFilter(\'appliance\',\'\')">Clear search</button>'
+    : f.tab === 'new' || f.tab === 'active' ? 'Nothing waiting — all caught up.' : 'Nothing here.'}</td></tr>`;
   labelCells('repairsTbody');
 }
 
@@ -604,15 +671,20 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.closest?.('#inventoryTbody .inv-edit')) { e.preventDefault(); saveAllInventory(); }
 });
 function discardInventoryEdits() { renderInventory(); showAdminToast('Changes discarded'); }
-function toggleInvMenu(force) {
-  const menu = document.getElementById('invMenu'), btn = document.getElementById('invMenuBtn');
+// ••• menus (Inventory, Sales, Repairs): one open at a time, closed by any click outside
+function toggleMenu(id, force) {
+  const menu = document.getElementById(id), btn = document.getElementById(id + 'Btn');
+  if (!menu) return;
   const open = force !== undefined ? force : menu.hidden;
-  menu.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+  document.querySelectorAll('.inv-menu').forEach(m => { if (m !== menu) { m.hidden = true; document.getElementById(m.id + 'Btn')?.setAttribute('aria-expanded', 'false'); } });
+  menu.hidden = !open; btn?.setAttribute('aria-expanded', String(open));
 }
+function toggleInvMenu(force) { toggleMenu('invMenu', force); }
 document.addEventListener('click', e => {
-  const menu = document.getElementById('invMenu');
-  if (menu && !menu.hidden && !e.target.closest('.inv-more')) toggleInvMenu(false);
-  if (e.target.closest('#invMenu button')) toggleInvMenu(false);
+  const inside = e.target.closest('.inv-more');
+  document.querySelectorAll('.inv-menu').forEach(m => {
+    if (!m.hidden && (!inside || !inside.contains(m) || e.target.closest('.inv-menu button'))) toggleMenu(m.id, false);
+  });
 });
 function toggleInvFilters() {
   const box = document.getElementById('invFilterBox');
@@ -822,29 +894,26 @@ function renderLedger() {
   document.getElementById('ledger-repair-rev').textContent = '$' + repairRev.toLocaleString('en-US',{minimumFractionDigits:2});
   document.getElementById('ledger-total-rev').textContent  = '$' + (salesRev+repairRev).toLocaleString('en-US',{minimumFractionDigits:2});
   document.getElementById('ledger-orders').textContent     = sales.length;
-  const fulfillLabel = f => f==='delivery'?'🚚 Delivery':f==='view'?'👀 View':'🏪 Pickup';
-  document.getElementById('ledgerTbody').innerHTML = sales.map(s => {
-    const statusColor = s.status==='completed'?'#27ae60':s.status==='cancelled'?'#c0392b':'#e67e22';
-    return `<tr>
-      <td style="font-size:.78rem">${formatDate(s.timestamp)}</td>
+  const fulfillLabel = f => f === 'delivery' ? 'Delivery' : f === 'view' ? 'Viewing' : 'Pickup';
+  document.getElementById('ledgerTbody').innerHTML = sales.map(s => `<tr>
+      <td><small>${formatDate(s.timestamp)}</small></td>
       <td><strong>${esc(s.orderId)}</strong></td>
-      <td style="font-size:.82rem">${esc(s.firstName||'')} ${esc(s.lastName||'')}<br><small style="color:var(--gray-mid)">${esc(s.email||'')}</small></td>
-      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem" title="${esc(s.items)}">${esc(s.items||'')}</td>
+      <td>${esc(s.firstName||'')} ${esc(s.lastName||'')}${s.email ? `<br><small>${esc(s.email)}</small>` : ''}</td>
+      <td class="wrap" style="max-width:220px">${esc(s.items||'')}</td>
       <td><strong>$${(s.total||0).toLocaleString('en-US',{minimumFractionDigits:2})}</strong></td>
-      <td style="font-size:.78rem">${fulfillLabel(s.fulfillment)}</td>
-      <td><span style="padding:.2rem .5rem;border-radius:5px;font-size:.7rem;font-weight:700;color:#fff;background:${statusColor}">${esc(s.status||'pending')}</span></td>
-      <td><button onclick="generateInvoice('${esc(s.orderId)}')" style="padding:.3rem .6rem;background:var(--ocean);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.72rem;font-family:var(--font-body)">🧾 Invoice</button></td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--gray-mid);padding:2rem">No sales in this period.</td></tr>';
+      <td>${fulfillLabel(s.fulfillment)}</td>
+      <td>${statusDot(s.status || 'pending')}</td>
+      <td><button class="card-btn small" onclick="generateInvoice('${esc(s.orderId)}')">${ic('file')} Invoice</button></td>
+    </tr>`).join('') || '<tr><td colspan="8" class="empty-row">No sales in this period.</td></tr>';
   document.getElementById('repairRevTbody').innerHTML = repairRevs.map(r => `<tr>
-    <td style="font-size:.78rem">${esc(r.date||'')}</td>
-    <td style="font-size:.82rem">${esc(r.desc||'')}</td>
-    <td style="font-size:.82rem">${esc(r.customer||'—')}</td>
+    <td><small>${esc(r.date||'')}</small></td>
+    <td class="wrap">${esc(r.desc||'')}</td>
+    <td>${esc(r.customer||'—')}</td>
     <td><strong>$${(r.amount||0).toFixed(2)}</strong></td>
-    <td style="font-size:.78rem;color:var(--gray-mid)">${esc(r.notes||'—')}</td>
-    <td><button onclick="generateRepairInvoice('${esc(r.id)}')" style="padding:.3rem .6rem;background:var(--ocean);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.72rem;font-family:var(--font-body)">🧾 Invoice</button></td>
-    <td><button onclick="deleteRepairRevenue('${esc(r.id)}')" style="background:none;border:none;cursor:pointer;color:var(--gray-mid);font-size:.9rem">🗑️</button></td>
-  </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--gray-mid);padding:2rem">No repair revenue yet.<br><small>Click "+ Add Repair Revenue" to log a completed service.</small></td></tr>';
+    <td><small>${esc(r.notes||'—')}</small></td>
+    <td><button class="card-btn small" onclick="generateRepairInvoice('${esc(r.id)}')">${ic('file')} Invoice</button></td>
+    <td><button class="action-btn danger" onclick="deleteRepairRevenue('${esc(r.id)}')" title="Delete">${ic('trash')}</button></td>
+  </tr>`).join('') || '<tr><td colspan="7" class="empty-row">No repair income yet.<br><small>Use “Repair income” to log a completed service.</small></td></tr>';
 }
 
 function exportLedgerCSV() {
@@ -959,7 +1028,11 @@ function exportCSV(type) {
 function formatDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  if (isNaN(d)) return String(iso);
+  // "Nov 8, 6:40 PM" this year; "Nov 8, 2025" for older dates
+  const thisYear = d.getFullYear() === new Date().getFullYear();
+  return thisYear ? d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                  : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 let adminToastTimer;
