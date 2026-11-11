@@ -14,8 +14,10 @@
   --ink:     #17191c;
   --ink-2:   #464b52;
   --ink-3:   #6a7077;
-  --accent:  #1f5068;
-  --accent-2:#2c6d8c;
+  --accent:  #1d6ca6;
+  --accent-2:#2a80bd;
+  --accent-deep: #155582;
+  --night:   #13283d;
   --warm:    #9a5b16;
   --ok:      #2f6f4f;
 
@@ -24,9 +26,9 @@
   --navy-deep:   #0f1113;
   --ocean:       var(--accent);
   --ocean-mid:   var(--accent-2);
-  --ocean-light: #8fb3c4;
-  --sky:         #eef3f4;
-  --sky-deep:    #c9d7dd;
+  --ocean-light: #8fbbe0;
+  --sky:         #eaf2f9;
+  --sky-deep:    #c4dbee;
   --white:       var(--surface);
   --off-white:   var(--paper);
   --gray-light:  var(--line);
@@ -55,7 +57,7 @@ img { max-width: 100%; display: block; }
 button { font: inherit; color: inherit; }
 a { color: var(--accent); text-underline-offset: .2em; }
 [hidden] { display: none !important; }
-::selection { background: var(--ink); color: var(--paper); }
+::selection { background: var(--accent); color: #fff; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .ic { width: 1.1em; height: 1.1em; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.18em; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
@@ -67,8 +69,8 @@ a { color: var(--accent); text-underline-offset: .2em; }
   padding: .75rem 1.4rem; border-radius: 99px; font-family: var(--font-body); font-size: .9rem; font-weight: 500;
   text-decoration: none; cursor: pointer; transition: background .2s, border-color .2s, color .2s;
 }
-.btn-primary { background: var(--ink); color: var(--paper); border: 1px solid var(--ink); }
-.btn-primary:hover { background: var(--accent); border-color: var(--accent); }
+.btn-primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+.btn-primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
 .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 .btn-outline { background: transparent; color: var(--ink); border: 1px solid var(--line-2); }
 .btn-outline:hover { border-color: var(--ink); }
