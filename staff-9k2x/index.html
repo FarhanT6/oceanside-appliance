@@ -3,12 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- Installable: Safari → Share → Add to Home Screen opens it full screen like an app -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="OA Staff" />
   <title>Staff — Oceanside Appliance</title>
   <meta name="theme-color" content="#faf9f6" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@400;500;600&display=swap" />
-  <link rel="stylesheet" href="base.css?v=30" />
-  <link rel="stylesheet" href="admin.css?v=30" />
+  <link rel="stylesheet" href="base.css?v=32" />
+  <link rel="stylesheet" href="admin.css?v=32" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -24,6 +31,7 @@
     <input type="password" id="adminPasswordInput" class="login-input" placeholder="Enter the staff password" autocomplete="current-password"
       onkeydown="if(event.key==='Enter')checkAdminPassword()" />
     <div id="adminLoginError" class="login-error" style="display:none;">Incorrect password. Please try again.</div>
+    <label class="login-remember"><input type="checkbox" id="adminRemember" checked /> Keep me signed in on this device</label>
     <button type="button" class="login-btn" onclick="checkAdminPassword()">Sign in</button>
     <div class="login-foot">Oceanside Appliance · Est. 1996</div>
   </div>
@@ -40,8 +48,9 @@
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
     const hash = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     if (hash === ADMIN_PASSWORD_HASH) {
-      // Store session so they don't have to log in every time
+      // This visit only, or remembered on this device (handy once it's on the home screen)
       sessionStorage.setItem('oa_admin_auth', 'true');
+      try { if (document.getElementById('adminRemember').checked) localStorage.setItem('oa_admin_remember', 'true'); } catch {}
       document.getElementById('adminLoginScreen').style.display = 'none';
     } else {
       error.style.display = 'block';
@@ -52,8 +61,17 @@
     }
   }
 
-  // Check if already authenticated this session
-  if (sessionStorage.getItem('oa_admin_auth') === 'true') {
+  function signOutStaff() {
+    if (!confirm('Sign out of the staff panel on this device?')) return;
+    sessionStorage.removeItem('oa_admin_auth');
+    try { localStorage.removeItem('oa_admin_remember'); } catch {}
+    location.reload();
+  }
+
+  // Already signed in this visit, or remembered on this device
+  let rememberedStaff = false;
+  try { rememberedStaff = localStorage.getItem('oa_admin_remember') === 'true'; } catch {}
+  if (sessionStorage.getItem('oa_admin_auth') === 'true' || rememberedStaff) {
     document.getElementById('adminLoginScreen').style.display = 'none';
   }
 </script>
@@ -107,6 +125,7 @@
       <div class="admin-topbar-right">
         <div style="display:flex;gap:.5rem">
           <button class="btn-sync ghost" onclick="sendBriefingNow(this)" title="Email yourself today's briefing now"><svg class="ic"><use href="../img/icons.svg#i-mail"/></svg> <span class="hide-sm">Send today's briefing</span></button>
+          <button class="btn-sync ghost" onclick="openSheetsModal()" title="Settings — Google Sheets, install on your phone, sign out" aria-label="Settings"><svg class="ic"><use href="../img/icons.svg#i-sliders"/></svg></button>
           <button class="btn-sync" id="syncBtn" onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg> Refresh</button>
         </div>
       </div>
@@ -359,33 +378,39 @@
   </main>
 </div>
 
-<!-- Sheets Config Modal -->
+<!-- Settings: Google Sheets connection, install on phone, sign out -->
 <div class="modal-overlay" id="sheetsModal" style="display:none;opacity:1;visibility:visible;pointer-events:all">
-  <div class="modal" style="max-width:480px">
+  <div class="modal settings-modal">
     <div class="modal-header">
-      <div class="modal-name" style="font-size:1.3rem">Connect Google Sheets</div>
-      <button class="modal-close" onclick="document.getElementById('sheetsModal').style.display='none'">✕</button>
+      <div class="modal-name">Settings</div>
+      <button class="modal-close" onclick="document.getElementById('sheetsModal').style.display='none'" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:.85rem;color:var(--gray-mid);margin-bottom:1.5rem">Google Sheets holds all orders, repair requests and inventory. Paste your Apps Script URL and the staff key (from running <code>setupAdminKey()</code> in Apps Script). They're saved in this browser only.</p>
+      <div class="settings-h">Google Sheets</div>
+      <p class="settings-p">Orders, repair requests and inventory live in Google Sheets. Paste the Apps Script URL and the staff key (from running <code>setupAdminKey()</code> in Apps Script). They're saved on this device only.</p>
       <div class="form-group">
-        <label>Apps Script URL</label>
-        <input type="url" id="sheetsUrlInput" placeholder="https://script.google.com/macros/s/..." style="width:100%" />
+        <label for="sheetsUrlInput">Apps Script URL</label>
+        <input type="url" id="sheetsUrlInput" placeholder="https://script.google.com/macros/s/..." />
       </div>
       <div class="form-group">
-        <label>Staff Key</label>
-        <input type="password" id="sheetsKeyInput" placeholder="oa-…" autocomplete="off" style="width:100%" />
+        <label for="sheetsKeyInput">Staff key</label>
+        <input type="password" id="sheetsKeyInput" placeholder="oa-…" autocomplete="off" />
       </div>
-      <button class="btn-primary" style="width:100%" onclick="saveSheetUrl()">Save & Connect</button>
-      <p style="font-size:.75rem;color:var(--gray-mid);margin-top:1rem;text-align:center">Setup steps are in the project README → “Google Sheets setup”.</p>
+      <button class="btn-primary" style="width:100%" onclick="saveSheetUrl()">Save &amp; connect</button>
+
+      <div class="settings-h">Use it like an app</div>
+      <p class="settings-p" id="installTip">On your iPhone, open this page in <strong>Safari</strong>, tap <strong>Share</strong> → <strong>Add to Home Screen</strong>. It opens full screen with its own icon. On Android (Chrome): <strong>⋮</strong> → <strong>Add to Home screen</strong>.</p>
+
+      <div class="settings-h">This device</div>
+      <button class="btn-outline" style="width:100%" onclick="signOutStaff()">Sign out</button>
     </div>
   </div>
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=30"></script>
-<script src="admin-tools.js?v=30"></script>
-<script src="bulk-import.js?v=30"></script>
+<script src="admin.js?v=32"></script>
+<script src="admin-tools.js?v=32"></script>
+<script src="bulk-import.js?v=32"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

@@ -27,6 +27,7 @@
 //     POST {type:'admin_auto_images', key, id}              → AI: finds + saves website images now
 //     POST {type:'admin_auto_price', key, id}               → AI: researches + saves the price range now
 //     POST {type:'admin_auto_specs', key, id}               → AI: looks up the model, fills in specs & dimensions
+//     POST {type:'admin_photo_files', key, urls}            → photos as files (staff "Save all photos")
 //     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //     POST {type:'admin_followups', key}                    → AI: drafts customer follow-ups now
 //     POST {type:'admin_ai_email', key, email}              → AI: drafts a reply to a customer email
@@ -231,6 +232,7 @@ function doPost(e) {
     if (type === 'admin_auto_price')   return jsonResponse(autoPriceEndpoint(data));
     if (type === 'admin_auto_specs')   return jsonResponse(autoSpecsEndpoint(data));
     if (type === 'admin_import_image') return jsonResponse(importImageFromUrl(data.url, data.name));
+    if (type === 'admin_photo_files')  return jsonResponse(photoFiles(data));
     if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_followups')    return jsonResponse(generateFollowups());
     if (type === 'admin_ai_email')     return jsonResponse(aiEmailReply(data));
@@ -756,6 +758,24 @@ function driveRenderAsJpeg(file) {
     }
   }
   return null;
+}
+
+// Hands photos to the staff panel as files, so "Save all photos" can put them on a phone
+// (the photo links are public; fetching them here avoids browser download restrictions)
+function photoFiles(d) {
+  const urls = (Array.isArray(d.urls) ? d.urls : []).map(String).filter(u => /^https?:\/\//i.test(u)).slice(0, 12);
+  const files = [];
+  if (!urls.length) return { success: true, files: files };
+  const res = UrlFetchApp.fetchAll(urls.map(u => ({ url: u, muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': BROWSER_UA } })));
+  res.forEach((r, i) => {
+    if (r.getResponseCode() !== 200) return;
+    const blob = r.getBlob(), type = String(blob.getContentType() || '').split(';')[0];
+    if (!/^image\//.test(type)) return;
+    const bytes = blob.getBytes();
+    if (!bytes.length || bytes.length > 8 * 1024 * 1024) return;
+    files.push({ index: i, type: type, data: Utilities.base64Encode(bytes) });
+  });
+  return { success: true, files: files };
 }
 
 // Copy an image from the web into our Drive folder (so it never breaks or hotlinks)
