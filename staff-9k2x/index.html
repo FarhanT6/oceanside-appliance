@@ -14,8 +14,8 @@
   <title>Staff — Oceanside Appliance</title>
   <meta name="theme-color" content="#faf9f6" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@400;500;600&display=swap" />
-  <link rel="stylesheet" href="base.css?v=32" />
-  <link rel="stylesheet" href="admin.css?v=32" />
+  <link rel="stylesheet" href="base.css?v=34" />
+  <link rel="stylesheet" href="admin.css?v=34" />
   <link rel="icon" type="image/svg+xml" href="../img/favicon.svg" />
 </head>
 <body class="admin-body">
@@ -100,6 +100,9 @@
       </a>
       <a href="#" class="sidebar-link" data-tab="inventory" title="Inventory">
         <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-other"/></svg></span><span class="sidebar-label">Inventory</span><span class="nav-count" id="navCountInventory"></span>
+      </a>
+      <a href="#" class="sidebar-link" data-tab="listings" title="Listings — Facebook, OfferUp, Craigslist">
+        <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-megaphone"/></svg></span><span class="sidebar-label">Listings</span><span class="nav-count" id="navCountListings"></span>
       </a>
       <a href="#" class="sidebar-link" data-tab="ledger" title="Ledger">
         <span class="sidebar-icon"><svg class="ic"><use href="../img/icons.svg#i-book"/></svg></span><span class="sidebar-label">Ledger</span>
@@ -271,6 +274,34 @@
       </div>
     </div>
 
+    <!-- ── LISTINGS TAB ── -->
+    <div class="admin-tab" id="tab-listings">
+      <div class="admin-card">
+        <div class="page-top">
+          <div>
+            <div class="inv-summary" id="lqSummary"></div>
+          </div>
+          <div class="page-actions">
+            <button class="card-btn primary" onclick="copyAgentInstructions()"><svg class="ic"><use href="../img/icons.svg#i-sparkles"/></svg> Copy instructions for Claude</button>
+            <div class="inv-more">
+              <button class="card-btn inv-more-btn" id="lqMenuBtn" onclick="toggleMenu('lqMenu')" aria-haspopup="true" aria-expanded="false" aria-label="More actions">•••</button>
+              <div class="inv-menu" id="lqMenu" hidden>
+                <button onclick="openProductFeed()"><svg class="ic"><use href="../img/icons.svg#i-share"/></svg><span>Google &amp; Facebook product feed<small>Your in-stock items on Google Shopping and your Facebook Page — automatic</small></span></button>
+                <button onclick="openListingsHelp()"><svg class="ic"><use href="../img/icons.svg#i-help"/></svg><span>How listing with Claude works</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="lq-platforms" id="lqPlatforms" role="tablist" aria-label="Site"></div>
+        <div class="inv-tabs" id="lqTabs" role="tablist" aria-label="Show"></div>
+        <div class="lq-opts">
+          <label class="check-line"><input type="checkbox" id="lqBiz" onchange="setListingPref('business', this.checked)" /> Include business name, address &amp; website link</label>
+          <label class="check-line"><input type="checkbox" id="lqAsIs" onchange="setListingPref('asIs', this.checked)" /> Add “Sold as-is”</label>
+        </div>
+        <div id="lqList"></div>
+      </div>
+    </div>
+
     <!-- ── LEDGER TAB ── -->
     <div class="admin-tab" id="tab-ledger">
       <div class="admin-card">
@@ -346,6 +377,7 @@
                 <button onclick="fillMissingSpecs()"><svg class="ic"><use href="../img/icons.svg#i-file"/></svg><span>Fill in specs &amp; dimensions<small>Looks up each model online · once per item</small></span></button>
                 <button onclick="researchMissingPrices()"><svg class="ic"><use href="../img/icons.svg#i-dollar"/></svg><span>Research prices<small>For in-stock items not researched yet</small></span></button>
                 <button onclick="pullFromSheets()"><svg class="ic"><use href="../img/icons.svg#i-refresh"/></svg><span>Refresh from Google Sheets</span></button>
+                <button onclick="openProductFeed()"><svg class="ic"><use href="../img/icons.svg#i-share"/></svg><span>Google &amp; Facebook product feed<small>Automatic listings from your inventory</small></span></button>
                 <button onclick="exportCSV('inventory')"><svg class="ic"><use href="../img/icons.svg#i-download"/></svg><span>Download CSV</span></button>
               </div>
             </div>
@@ -408,9 +440,9 @@
 </div>
 
 <script src="../js/logo.js?v=3"></script>
-<script src="admin.js?v=32"></script>
-<script src="admin-tools.js?v=32"></script>
-<script src="bulk-import.js?v=32"></script>
+<script src="admin.js?v=34"></script>
+<script src="admin-tools.js?v=34"></script>
+<script src="bulk-import.js?v=34"></script>
 
   <!-- ── INVOICE MODAL ── -->
   <div id="invoiceOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;overflow-y:auto">

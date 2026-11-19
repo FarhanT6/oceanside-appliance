@@ -159,7 +159,7 @@ async function pullFromSheets({ silent = false, force = false } = {}) {
     syncStorefront();
     setSheetsState('ok');
     const active = document.querySelector('.sidebar-link.active')?.dataset.tab || 'dashboard';
-    if (active === 'inventory') renderInventorySafely(); else renderTab(active);
+    if (active === 'inventory') renderInventorySafely(); else if (active === 'listings') renderListingsSafely(); else renderTab(active);
     if (active !== 'dashboard') renderDashboard();
     if (!silent) showAdminToast('✅ Up to date with Google Sheets');
   } catch (e) {
@@ -179,7 +179,7 @@ function showTab(tabName) {
   document.getElementById('tab-' + tabName)?.classList.add('active');
   document.querySelector(`[data-tab="${tabName}"]`)?.classList.add('active');
 
-  const titles = { dashboard: 'Today', sales: 'Sales', repairs: 'Repairs', inventory: 'Inventory', ledger: 'Ledger' };
+  const titles = { dashboard: 'Today', sales: 'Sales', repairs: 'Repairs', inventory: 'Inventory', listings: 'Listings', ledger: 'Ledger' };
   document.getElementById('pageTitle').textContent = titles[tabName] || tabName;
 
   renderTab(tabName);
@@ -190,6 +190,7 @@ function renderTab(tab) {
   else if (tab === 'sales')    renderSales();
   else if (tab === 'repairs')  renderRepairs();
   else if (tab === 'inventory') renderInventory();
+  else if (tab === 'listings') renderListings();
   else if (tab === 'ledger')    renderLedger();
 }
 
@@ -219,6 +220,7 @@ function renderDashboard() {
   const drafts = inStock.filter(p => p.draft);
   const views = getViewRequests().filter(v => (v.status || 'New') === 'New');
   const followups = getStore('followups').filter(f => f.status === 'open');
+  const takeDowns = listingTakeDowns(inv);
 
   const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
   set('kpi-revenue', money0(monthSales.reduce((t, o) => t + (o.total || 0), 0)));
@@ -234,6 +236,7 @@ function renderDashboard() {
   set('navCountSales', openOrders.length || '');
   set('navCountRepairs', newRepairs.length || '');
   set('navCountInventory', attention.length || '');
+  set('navCountListings', takeDowns.length || '');
 
   // To do
   const todo = [
@@ -243,6 +246,7 @@ function renderDashboard() {
     [followups.length, 'Follow-ups ready to send', followups.slice(0, 2).map(f => f.customer).filter(Boolean).join(', '), "document.getElementById('followupsCard').scrollIntoView({behavior:'smooth'})"],
     [attention.length, 'Items that need attention', 'Missing a price, website image, model # or location', "openInventoryTab('attention')"],
     [drafts.length, 'Drafts not on the website yet', 'Check the details, then tick “Show on the website”', "openInventoryTab('drafts')"],
+    [takeDowns.length, 'Sold items still listed online', [...new Set(takeDowns.map(t => MARKET[t.platform].name))].join(', ') + ' — mark them sold or delete the posts', "openListingsTab('takedown')"],
   ].filter(([n]) => n > 0);
   const list = document.getElementById('todoList');
   if (list) list.innerHTML = todo.map(([n, title, sub, go]) => `
@@ -1063,6 +1067,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('sheetsStatus')?.addEventListener('click', openSheetsModal);
+
+  // Links like …/staff-9k2x/#listings/facebook open that page directly (used by the Claude instructions)
+  const route = location.hash.slice(1).split('/');
+  if (route[0] === 'listings') { if (MARKET[route[1]]) lqFilter.platform = route[1]; if (['topost', 'posted', 'takedown'].includes(route[2])) lqFilter.tab = route[2]; showTab('listings'); }
 
   if (!getAdminKey()) {
     setSheetsState('nokey');
