@@ -28,6 +28,8 @@
 //     POST {type:'admin_auto_price', key, id}               → AI: researches + saves the price range now
 //     POST {type:'admin_auto_specs', key, id}               → AI: looks up the model, fills in specs & dimensions
 //     POST {type:'admin_photo_files', key, urls}            → photos as files (staff "Save all photos")
+//     POST {type:'admin_feed', key}                         → rebuilds the product feed now, returns its links
+//     GET  ?action=feed                                     → product feed (Google Merchant Center / Meta), tab-separated
 //     POST {type:'admin_briefing', key}                     → emails today's briefing now
 //     POST {type:'admin_followups', key}                    → AI: drafts customer follow-ups now
 //     POST {type:'admin_ai_email', key, email}              → AI: drafts a reply to a customer email
@@ -74,6 +76,7 @@ const COLLECTIONS = {
       ['Our Price ($)', 'price', NUM], ['Stock Qty', 'stock', INT],
       // Display-only columns, worked out from the record
       ['On Website', '_listing', RO, p => (Number(p.stock) || 0) <= 0 ? 'Sold out' : p.draft ? 'Draft' : 'Live'],
+      ['Listed On', '_posted', RO, p => postedOn(p).join(', ')],
       ['Market Range', '_range', RO, p => p.priceResearch && p.priceResearch.low ? '$' + p.priceResearch.low + '–$' + p.priceResearch.high : ''],
       ['MSRP ($)', 'msrp', NUM], ['Competitor Price ($)', 'refPrice', NUM], ['Storage Location', 'storageLocation'],
       ['Description', 'desc'], ['Image URL(s)', 'imageUrl'], ['Inventory Photos (staff)', 'internalPhotos'],
@@ -190,6 +193,11 @@ function doGet(e) {
     });
     return jsonResponse({ success: true, products: products });
   }
+  if (action === 'feed') { // product feed for Google Merchant Center / Meta (tab-separated)
+    const rows = feedRows().rows;
+    const tsv = [FEED_COLS.join('\t')].concat(rows.map(r => FEED_COLS.map(c => String(r[c] == null ? '' : r[c]).replace(/[\t\r\n]+/g, ' ')).join('\t'))).join('\n');
+    return ContentService.createTextOutput(tsv).setMimeType(ContentService.MimeType.TEXT);
+  }
   return jsonResponse({ status: 'ok', app: 'Oceanside Appliance', version: 2 });
 }
 
@@ -233,6 +241,7 @@ function doPost(e) {
     if (type === 'admin_auto_specs')   return jsonResponse(autoSpecsEndpoint(data));
     if (type === 'admin_import_image') return jsonResponse(importImageFromUrl(data.url, data.name));
     if (type === 'admin_photo_files')  return jsonResponse(photoFiles(data));
+    if (type === 'admin_feed')         return jsonResponse(Object.assign({ success: true }, refreshProductFeed()));
     if (type === 'admin_briefing')     { sendDailyBriefing(); return jsonResponse({ success: true }); }
     if (type === 'admin_followups')    return jsonResponse(generateFollowups());
     if (type === 'admin_ai_email')     return jsonResponse(aiEmailReply(data));
@@ -552,7 +561,7 @@ function fromLegacyRow(name, def, headers, row, rowIndex) {
 const SHEET_COLORS = { header: '#1a2e44', headerRO: '#4a6177', band: '#f5f9fd', soldOut: '#9aa8b6' };
 const DATE_KEYS = { timestamp: 1, updatedAt: 1, lastAt: 1 };
 const COL_WIDTHS = {
-  id: 150, name: 280, brand: 110, model: 130, category: 110, condition: 130, price: 100, stock: 80, _listing: 100, _range: 120,
+  id: 150, name: 280, brand: 110, model: 130, category: 110, condition: 130, price: 100, stock: 80, _listing: 100, _posted: 150, _range: 120,
   msrp: 95, refPrice: 125, storageLocation: 130, desc: 320, imageUrl: 180, internalPhotos: 180, updatedAt: 150,
   orderId: 160, timestamp: 150, status: 115, channel: 140, firstName: 110, lastName: 110, phone: 125, email: 200, items: 300,
   itemCount: 80, subtotal: 95, tax: 80, deliveryFee: 110, total: 95, fulfillment: 110, address: 240, availability: 170, notes: 240,
@@ -1630,10 +1639,88 @@ function autoTriageRepairs() {
   });
 }
 
+// ─── WHERE AN ITEM IS POSTED (Facebook Marketplace / OfferUp / Craigslist) ───
+const MARKETPLACES = { facebook: 'Facebook', offerup: 'OfferUp', craigslist: 'Craigslist' };
+function postedOn(p) {
+  const l = p && p.listings && typeof p.listings === 'object' ? p.listings : {};
+  return Object.keys(MARKETPLACES).filter(k => l[k] && l[k].url && !l[k].removedAt).map(k => MARKETPLACES[k]);
+}
+
+// ─── PRODUCT FEED (Google Merchant Center free listings + Meta catalog for Facebook/Instagram) ───
+// Public product information only, rebuilt every hour. Kept in its own spreadsheet so it can be
+// shared with Google/Meta without exposing orders or customers.
+const FEED_COLS = ['id', 'title', 'description', 'availability', 'condition', 'price', 'link', 'image_link',
+  'additional_image_link', 'brand', 'mpn', 'identifier_exists', 'product_type'];
+const FEED_TYPE = { refrigerator: 'Refrigerators', washer: 'Washers', dryer: 'Dryers', dishwasher: 'Dishwashers', oven: 'Ovens & Ranges',
+  microwave: 'Microwaves', freezer: 'Freezers', vacuum: 'Vacuums', other: 'Appliances' };
+
+// One row per in-stock, published, priced item with a website image; the rest are listed with the reason
+function feedRows() {
+  const base = siteUrl();
+  const rows = [], skipped = [];
+  readCollection('inventory').forEach(p => {
+    if ((Number(p.stock) || 0) <= 0) return; // sold out: just leave it out
+    const imgs = String(p.imageUrl || '').split(/[\s,]+/).filter(u => /^https?:\/\//i.test(u));
+    const why = p.draft ? 'Draft — not on the website yet' : !(Number(p.price) > 0) ? 'No price' : !imgs.length ? 'No website image'
+      : /part/i.test(String(p.condition || '')) ? 'For parts — kept off Google and Facebook' : '';
+    if (why) { skipped.push({ id: p.id, name: clean(p.name, 120), reason: why }); return; }
+    const cond = String(p.condition || '').toLowerCase();
+    const openBox = /open/.test(cond);
+    // Google: "new" means unopened, so open-box items are listed as used and say so
+    const condition = cond.indexOf('new') === 0 && !openBox ? 'new' : /refurb/.test(cond) ? 'refurbished' : 'used';
+    const brand = clean(p.brand, 70), name = clean(p.name, 150);
+    const title = (brand && name.toLowerCase().indexOf(brand.toLowerCase()) !== 0 ? brand + ' ' + name : name).slice(0, 150);
+    const desc = [
+      openBox ? 'Open box — never used.' : condition === 'used' ? 'Used' + (p.condition && /-/.test(p.condition) ? ' (' + clean(p.condition.split('-').pop(), 30).toLowerCase() + ' condition)' : '') + '.' : '',
+      clean(p.desc, 3500),
+      (sp => sp.length ? sp.join('. ') + '.' : '')(Object.entries(cleanSpecs(p.specs)).slice(0, 8).map(e => e[0] + ': ' + e[1])),
+      'Available at Oceanside Appliance, 1016 S Tremont St, Oceanside, CA. Pickup by appointment; delivery and installation available.'
+    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 4900);
+    rows.push({
+      id: p.id, title: title, description: desc, availability: 'in stock', condition: condition,
+      price: (Math.round(Number(p.price) * 100) / 100).toFixed(2) + ' USD',
+      link: base + 'product.html?id=' + encodeURIComponent(p.id),
+      image_link: imgs[0], additional_image_link: imgs.slice(1, 10).join(','),
+      brand: brand, mpn: clean(p.model, 70), identifier_exists: p.model ? '' : 'no',
+      product_type: 'Appliances > ' + (FEED_TYPE[p.category] || 'Appliances')
+    });
+  });
+  return { rows: rows, skipped: skipped };
+}
+
+function productFeedSpreadsheet() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('FEED_SHEET_ID');
+  if (id) { try { return SpreadsheetApp.openById(id); } catch (err) { /* deleted — make a new one */ } }
+  const ss = SpreadsheetApp.create('Oceanside Appliance — Product Feed (public)');
+  DriveApp.getFileById(ss.getId()).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  props.setProperty('FEED_SHEET_ID', ss.getId());
+  return ss;
+}
+
+// ▶ Rebuilds the feed now (runs hourly once setupAutomations has been run)
+function refreshProductFeed() {
+  const f = feedRows();
+  const ss = productFeedSpreadsheet();
+  const sh = ss.getSheets()[0];
+  if (sh.getName() !== 'Products') sh.setName('Products');
+  sh.clearContents();
+  const values = [FEED_COLS].concat(f.rows.map(r => FEED_COLS.map(c => r[c] == null ? '' : String(r[c]))));
+  const range = sh.getRange(1, 1, values.length, FEED_COLS.length);
+  range.setNumberFormat('@'); // plain text: keeps model numbers like 0123 and never runs anything as a formula
+  range.setValues(values);
+  sh.setFrozenRows(1);
+  const updatedAt = new Date().toISOString();
+  PropertiesService.getScriptProperties().setProperty('FEED_UPDATED_AT', updatedAt);
+  let feedUrl = '';
+  try { feedUrl = ScriptApp.getService().getUrl() + '?action=feed'; } catch (err) { /* not deployed as a web app */ }
+  return { count: f.rows.length, skipped: f.skipped, sheetUrl: ss.getUrl(), feedUrl: feedUrl, updatedAt: updatedAt };
+}
+
 // ▶ Run once from the editor to turn on the automations (safe to run again).
 function setupAutomations() {
   ScriptApp.getProjectTriggers()
-    .filter(t => ['autoTriageRepairs', 'sendDailyBriefing', 'autoFindImages', 'generateFollowups', 'autoResearchPrices'].indexOf(t.getHandlerFunction()) >= 0)
+    .filter(t => ['autoTriageRepairs', 'sendDailyBriefing', 'autoFindImages', 'generateFollowups', 'autoResearchPrices', 'refreshProductFeed'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('autoTriageRepairs').timeBased().everyMinutes(10).create();
   ScriptApp.newTrigger('sendDailyBriefing').timeBased().everyDays(1).atHour(7).inTimezone('America/Los_Angeles').create();
@@ -1641,7 +1728,9 @@ function setupAutomations() {
   ScriptApp.newTrigger('autoResearchPrices').timeBased().everyMinutes(15).create();
   try { polishSheets(); } catch (err) { Logger.log('Could not tidy the spreadsheet: ' + err); }
   ScriptApp.newTrigger('generateFollowups').timeBased().everyDays(1).atHour(6).inTimezone('America/Los_Angeles').create();
-  Logger.log('On: repair diagnosis every 10 min, website image finder + price research every 15 min, follow-up drafts daily at 6am, morning briefing daily at 7am Pacific.');
+  ScriptApp.newTrigger('refreshProductFeed').timeBased().everyHours(1).create();
+  try { const f = refreshProductFeed(); Logger.log('Product feed: ' + f.count + ' items → ' + f.sheetUrl); } catch (err) { Logger.log('Could not build the product feed: ' + err); }
+  Logger.log('On: repair diagnosis every 10 min, website image finder + price research every 15 min, product feed hourly, follow-up drafts daily at 6am, morning briefing daily at 7am Pacific.');
 }
 
 // ─── SHARED FACTS FOR THE CUSTOMER-FACING ASSISTANTS ───

@@ -839,6 +839,271 @@ function openMovePhotos({ photos, start, fromId, onMove }) {
   renderPhotos(); renderList();
 }
 
+// ─── LISTINGS: Facebook Marketplace / OfferUp / Craigslist queue ───
+// Each item records where it's posted: p.listings = { facebook: { url, at, removedAt? }, offerup: …, craigslist: … }
+const MARKET = {
+  facebook: {
+    name: 'Facebook Marketplace', short: 'Facebook', post: 'https://www.facebook.com/marketplace/create/item', publish: 'Publish',
+    domain: /(^|\.)facebook\.com$|(^|\.)fb\.com$/, category: 'Appliances',
+    tips: 'Choose "Item for sale". Location: Oceanside, CA.',
+    condition: c => /^new/.test(c) && !/open/.test(c) ? 'New' : /open|excellent/.test(c) ? 'Used – Like New' : /good/.test(c) ? 'Used – Good' : 'Used – Fair',
+  },
+  offerup: {
+    name: 'OfferUp', short: 'OfferUp', post: 'https://offerup.com/', publish: 'Post',
+    domain: /(^|\.)offerup\.com$/, category: 'Home & garden › Appliances',
+    tips: 'Use "Post an item" (or "Sell"). Choose local pickup only — no shipping. Location: Oceanside, CA 92054.',
+    condition: c => /^new/.test(c) && !/open/.test(c) ? 'New' : /open/.test(c) ? 'Open box' : /part/.test(c) ? 'For parts' : 'Used (normal wear)',
+  },
+  craigslist: {
+    name: 'Craigslist', short: 'Craigslist', post: 'https://post.craigslist.org/c/sdo', publish: 'Publish',
+    domain: /(^|\.)craigslist\.org$/, category: 'for sale by dealer › appliances',
+    tips: 'Area: San Diego; if it asks for a sub-area choose "north SD county". Type: "for sale by dealer" → "appliances". ZIP code 92054.',
+    condition: c => /^new/.test(c) && !/open/.test(c) ? 'new' : /open/.test(c) ? 'like new' : /excellent/.test(c) ? 'excellent' : /good/.test(c) ? 'good' : /part/.test(c) ? 'salvage' : 'fair',
+  },
+};
+let lqFilter = { platform: 'facebook', tab: 'topost' };
+const lqOpen = new Set();          // items whose details are open (kept across refreshes)
+const lqPhotoFiles = new Map();    // id → prepared photo files (for one-tap "Save all photos")
+const activeListing = (p, k) => { const l = p.listings && p.listings[k]; return l && l.url && !l.removedAt ? l : null; };
+const listingPhotos = p => [...String(p.internalPhotos || '').split(/[\s,]+/).filter(Boolean), ...imagesOf(p)].filter((u, i, a) => a.indexOf(u) === i).slice(0, 12);
+const lqReady = p => Number(p.stock) > 0 && !p.draft && Number(p.price) > 0 && listingPhotos(p).length > 0;
+function listingTakeDowns(inv) {
+  const out = [];
+  (inv || getInventory()).forEach(p => { if (Number(p.stock) <= 0) Object.keys(MARKET).forEach(k => { if (activeListing(p, k)) out.push({ p, platform: k }); }); });
+  return out;
+}
+function listingPrefs() { try { return JSON.parse(localStorage.getItem('oa_listing_prefs') || '{"business":true,"asIs":true}'); } catch { return { business: true, asIs: true }; } }
+function setListingPref(k, v) { const prefs = listingPrefs(); prefs[k] = v; try { localStorage.setItem('oa_listing_prefs', JSON.stringify(prefs)); } catch {} renderListings(); }
+function openListingsTab(tab) { lqFilter.tab = tab; showTab('listings'); }
+function setLq(k, v) { lqFilter[k] = v; lqOpen.clear(); renderListings(); }
+
+function renderListingsSafely() {
+  const typing = document.activeElement?.closest?.('#lqList') || [...document.querySelectorAll('#lqList .lq-url')].some(i => i.value.trim());
+  if (typing) return; // don't wipe a link that's being pasted
+  renderListings();
+}
+
+function renderListings() {
+  const list = document.getElementById('lqList');
+  if (!list) return;
+  const k = lqFilter.platform, m = MARKET[k];
+  const inv = getInventory();
+  const prefs = listingPrefs();
+  history.replaceState(null, '', `#listings/${k}/${lqFilter.tab}`);
+  document.getElementById('lqBiz').checked = !!prefs.business || k === 'craigslist';
+  document.getElementById('lqBiz').disabled = k === 'craigslist';
+  document.getElementById('lqAsIs').checked = !!prefs.asIs;
+
+  const groups = {
+    topost: inv.filter(p => lqReady(p) && !activeListing(p, k)),
+    posted: inv.filter(p => Number(p.stock) > 0 && activeListing(p, k)),
+    takedown: inv.filter(p => Number(p.stock) <= 0 && activeListing(p, k)),
+  };
+  const notReady = inv.filter(p => Number(p.stock) > 0 && !lqReady(p) && !activeListing(p, k)).length;
+  document.getElementById('lqPlatforms').innerHTML = Object.entries(MARKET).map(([key, mk]) => {
+    const n = listingTakeDowns(inv).filter(t => t.platform === key).length;
+    return `<button type="button" role="tab" class="lq-pf ${key === k ? 'on' : ''}" aria-selected="${key === k}" onclick="setLq('platform','${key}')">${esc(mk.name)}${n ? `<span class="lq-alert" title="${n} sold item${n > 1 ? 's' : ''} still posted">${n}</span>` : ''}</button>`;
+  }).join('');
+  document.getElementById('lqTabs').innerHTML = [['topost', 'To post'], ['posted', 'Posted'], ['takedown', 'Take down']].map(([t, label]) =>
+    `<button type="button" role="tab" class="inv-tab ${t === lqFilter.tab ? 'on' : ''} ${t === 'takedown' && groups[t].length ? 'warn' : ''}" aria-selected="${t === lqFilter.tab}" onclick="setLq('tab','${t}')">${label}<span>${groups[t].length}</span></button>`).join('');
+  document.getElementById('lqSummary').textContent =
+    `${m.name}: ${groups.topost.length} to post · ${groups.posted.length} posted` + (groups.takedown.length ? ` · ${groups.takedown.length} sold but still posted` : '') +
+    (notReady ? ` · ${notReady} not ready yet (draft, or no price/photos)` : '');
+
+  const items = groups[lqFilter.tab].sort((a, b) => String(b.createdAt || b.id).localeCompare(String(a.createdAt || a.id)));
+  if (!items.length) {
+    list.innerHTML = `<div class="lq-empty">${lqFilter.tab === 'topost' ? `Everything that's ready is posted on ${esc(m.short)}.${notReady ? ` ${notReady} item${notReady > 1 ? 's aren’t' : ' isn’t'} ready yet — publish ${notReady > 1 ? 'them' : 'it'} and add a price and photos in Inventory.` : ''}`
+      : lqFilter.tab === 'posted' ? `Nothing posted on ${esc(m.short)} yet.` : `Nothing to take down — no sold items are still posted on ${esc(m.short)}.`}</div>`;
+    return;
+  }
+  if (lqFilter.tab === 'topost' && !lqOpen.size) lqOpen.add(items[0].id); // first one open, ready to go
+  list.innerHTML = items.map(p => listingCard(p, k, prefs)).join('');
+  list.querySelectorAll('details.lq-item[open]').forEach(d => prepareLqPhotos(d.dataset.id));
+}
+
+function listingCard(p, k, prefs) {
+  const m = MARKET[k], id = esc(p.id);
+  const t = listingText(p, { business: k === 'craigslist' ? true : !!prefs.business, asIs: !!prefs.asIs });
+  const photos = listingPhotos(p);
+  const live = p.listings && p.listings[k];
+  const cond = m.condition(String(p.condition || '').toLowerCase());
+  const field = (label, value, copy, cls = '') => `<div class="lq-f ${cls}"><dt>${label}</dt><dd><span class="lq-v">${value}</span>${copy ? `<button type="button" class="link-btn" data-copy-text="${esc(copy)}" data-copy-what="${label}">${ic('copy')} Copy</button>` : ''}</dd></div>`;
+  const ready = lqPhotoFiles.get(p.id);
+  let actions;
+  if (lqFilter.tab === 'topost') {
+    actions = `<a class="card-btn" href="${m.post}" target="_blank" rel="noopener">${ic('external')} Open ${esc(m.short)}</a>
+      <label class="lq-urlbox"><span class="sr-only">Paste the ${esc(m.short)} listing link</span><input type="url" class="lq-url" id="lqurl_${id}" placeholder="Paste the ${esc(m.short)} listing link" /></label>
+      <button type="button" class="card-btn primary" onclick="markListingPosted('${id}','${k}')">${ic('check')} Mark posted</button>`;
+  } else if (lqFilter.tab === 'posted') {
+    actions = `<a class="card-btn" href="${esc(live.url)}" target="_blank" rel="noopener">${ic('external')} Open post</a>
+      <span class="hint">Posted ${formatDate(live.at)}</span><span style="flex:1"></span>
+      <button type="button" class="card-btn" onclick="markListingRemoved('${id}','${k}')">Mark taken down</button>`;
+  } else {
+    actions = `<span class="hint">Sold — delete it or mark it sold on ${esc(m.short)}, then:</span>
+      <a class="card-btn" href="${esc(live.url)}" target="_blank" rel="noopener">${ic('external')} Open post</a>
+      <button type="button" class="card-btn primary" onclick="markListingRemoved('${id}','${k}')">${ic('check')} Mark taken down</button>`;
+  }
+  return `<details class="lq-item" data-id="${id}" ${lqOpen.has(p.id) ? 'open' : ''}>
+    <summary>
+      <span class="lq-thumb">${photos[0] ? `<img src="${esc(photos[0])}" alt="" loading="lazy" />` : ic('camera')}</span>
+      <span class="lq-head"><strong>${esc(t.title)}</strong><small>$${esc(Number(p.price).toLocaleString())} · ${esc(cond)}${p.storageLocation ? ' · ' + esc(p.storageLocation) : ''} · ${photos.length} photo${photos.length === 1 ? '' : 's'}</small></span>
+      <span class="lq-chev">${ic('chevron-right')}</span>
+    </summary>
+    <div class="lq-body">
+      <dl class="lq-fields">
+        ${field('Title', esc(t.title), t.title, 'wide')}
+        ${field('Price', '$' + esc(Number(p.price).toLocaleString()), String(Math.round(Number(p.price))))}
+        ${field('Category', esc(m.category))}
+        ${field('Condition', esc(cond))}
+        ${field('Location', 'Oceanside, CA 92054')}
+        ${field('Description', `<pre class="lq-desc">${esc(t.body)}</pre>`, t.body, 'wide')}
+        <div class="lq-f wide"><dt>Photos</dt><dd>
+          <div class="lq-photos">${photos.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="Photo ${i + 1}"><img src="${esc(u)}" alt="Photo ${i + 1}" loading="lazy" /></a>`).join('')}</div>
+          <button type="button" class="card-btn" data-lq-save="${id}" ${ready ? '' : 'disabled'}>${ic('download')} <span>${ready ? saveLabel(ready.length) : 'Getting photos ready…'}</span></button>
+        </dd></div>
+      </dl>
+      <div class="lq-actions">${actions}</div>
+    </div>
+  </details>`;
+}
+
+async function prepareLqPhotos(id) {
+  if (lqPhotoFiles.has(id)) return;
+  const p = getStore('inventory').find(x => x.id === id);
+  const btn = () => document.querySelector(`[data-lq-save="${CSS.escape(id)}"]`);
+  try {
+    const files = await listingPhotoFiles(listingPhotos(p), p);
+    if (!files.length) throw new Error('none');
+    lqPhotoFiles.set(id, files);
+    const b = btn(); if (b) { b.disabled = false; b.querySelector('span').textContent = saveLabel(files.length); }
+  } catch (err) {
+    const b = btn(); if (b) { b.disabled = false; b.querySelector('span').textContent = /Unknown request/i.test(err.message || '') ? 'Deploy the latest Apps Script first' : 'Try again'; }
+  }
+}
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (!d.matches || !d.matches('details.lq-item')) return;
+  if (d.open) { lqOpen.add(d.dataset.id); prepareLqPhotos(d.dataset.id); } else lqOpen.delete(d.dataset.id);
+}, true);
+document.addEventListener('click', async e => {
+  const c = e.target.closest('[data-copy-text]');
+  if (c && c.closest('#lqList')) { copyText(c.dataset.copyText, `${c.dataset.copyWhat} copied`); return; }
+  const b = e.target.closest('[data-lq-save]');
+  if (!b) return;
+  const files = lqPhotoFiles.get(b.dataset.lqSave);
+  if (!files) { lqPhotoFiles.delete(b.dataset.lqSave); return prepareLqPhotos(b.dataset.lqSave); }
+  if (navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ files }); } catch (err) { if (err.name !== 'AbortError') showAdminToast('⚠️ ' + err.message); }
+    return;
+  }
+  for (const f of files) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    await new Promise(r => setTimeout(r, 350));
+  }
+  showAdminToast(`⬇️ Downloaded ${files.length} photo${files.length === 1 ? '' : 's'}`);
+});
+function saveLabel(n) { return n === 1 ? 'Save the photo' : `Save all ${n} photos`; }
+
+function saveListings(id, mutate, reason) {
+  const inv = getStore('inventory');
+  const p = inv.find(x => x.id === id);
+  if (!p) return showAdminToast('⚠️ That item was removed');
+  const listings = JSON.parse(JSON.stringify(p.listings || {}));
+  mutate(listings);
+  p.listings = listings;
+  setStore('inventory', inv);
+  saveRemote('inventory', [{ id, listings }], reason);
+  renderListings(); renderDashboard();
+}
+function markListingPosted(id, k) {
+  const input = document.getElementById('lqurl_' + id);
+  const url = (input?.value || '').trim();
+  let host = '';
+  try { host = new URL(url).hostname; } catch {}
+  if (!/^https?:\/\//i.test(url) || !host) { input?.focus(); return showAdminToast(`⚠️ Paste the link to the ${MARKET[k].short} listing first`); }
+  if (!MARKET[k].domain.test(host) && !confirm(`That link isn't a ${MARKET[k].short} link (${host}). Save it anyway?`)) return;
+  input.value = '';
+  lqOpen.delete(id);
+  saveListings(id, l => { l[k] = { url, at: new Date().toISOString() }; }, `listed on ${MARKET[k].short}`);
+  showAdminToast(`✅ Marked as posted on ${MARKET[k].short}`);
+}
+function markListingRemoved(id, k) {
+  saveListings(id, l => { if (l[k]) l[k].removedAt = new Date().toISOString(); }, `taken down from ${MARKET[k].short}`);
+  showAdminToast(`✅ Marked as taken down from ${MARKET[k].short}`);
+}
+
+// Ready-to-paste instructions for Claude in Chrome (it works in your own logged-in browser)
+function copyAgentInstructions() {
+  const k = lqFilter.platform, m = MARKET[k];
+  const page = `${location.href.split('#')[0]}#listings/${k}/topost`;
+  const text = `Please post my appliance listings on ${m.name} for Oceanside Appliance, using this Chrome window where I'm already signed in.
+
+Where the listings are: ${page}
+That page (my staff portal) shows every appliance still to post on ${m.short} under "To post". Click an item to open it — it shows the exact Title, Price, Category, Condition, Location, Description and Photos to use.
+
+Post up to 5 items this time, starting from the top. For each item:
+1. Open ${m.post} in a new tab.
+2. Fill in the form with the item's details exactly as shown on the staff page. Don't change the price and don't add anything that isn't in the description. ${m.tips} If a dropdown doesn't have the exact wording, pick the closest option.
+3. Photos: add the item's photos in the order shown ("Save all photos" on the item downloads them to this computer). If you can't attach the photos yourself, stop and ask me to add them, then carry on.
+4. Before you click the final "${m.publish}" button, stop and show me the filled-in listing. Only publish after I reply "OK".
+5. Once it's published, copy the new listing's link. Back on the staff page, paste it into "Paste the ${m.short} listing link" on that item and click "Mark posted".
+6. Wait 2–3 minutes before starting the next item.
+
+Rules: never message buyers, accept offers, change prices or enter payment or bank details. If a site shows a warning or a captcha, or asks for a verification code, stop and tell me.`;
+  copyText(text, `Instructions copied — paste them into Claude in Chrome`);
+}
+
+function openListingsHelp() {
+  openAdminModal({
+    title: 'Posting listings with Claude',
+    body: `<ol class="help-steps">
+      <li><strong>Once:</strong> on your computer, install <strong>Claude in Chrome</strong> from the Chrome Web Store and sign in with your Claude account. Open this staff panel in that Chrome and sign in.</li>
+      <li>Go to <strong>Listings</strong>, pick the site (Facebook Marketplace, OfferUp or Craigslist) and tap <strong>Copy instructions for Claude</strong>.</li>
+      <li>Open the Claude side panel in Chrome and paste. Claude opens each item, fills in the site's form, adds the photos and <strong>stops before Publish</strong> so you can check it. Reply “OK” and it publishes, then records the link here.</li>
+      <li>It does up to 5 items at a time, a few minutes apart. Do a batch a day rather than everything at once.</li>
+      <li>When something sells, tap <strong>Record sale</strong> as usual. It shows up under <strong>Take down</strong> here (and on Today) for every site it's still posted on.</li>
+    </ol>
+    <p class="hint">Why it stops before Publish: Facebook, OfferUp and Craigslist don't allow fully automated posting, and accounts that post too fast get restricted. You stay the one who publishes. Want items to show up without posting at all? Use <a href="#" onclick="openProductFeed();return false">the Google &amp; Facebook product feed</a>.</p>`,
+  });
+}
+
+// Google Merchant Center + Meta Commerce Manager feed
+async function openProductFeed() {
+  const m = openAdminModal({
+    title: 'Google & Facebook product feed',
+    size: 'wide',
+    body: `<p class="am-lead">Your in-stock items, updated every hour, ready for <strong>Google</strong> (free listings on Google Shopping, Search and Maps) and <strong>Facebook &amp; Instagram</strong> (your Page's catalog). Nobody has to post anything — sold items drop off on their own.</p>
+      <div id="feedOut"><div class="ai-note">${ic('refresh')}<span>Updating the feed…</span></div></div>`,
+  });
+  try {
+    const r = await apiPost('admin_feed');
+    const copyRow = (label, url) => `<div class="feed-link"><span class="af-label">${label}</span><input readonly value="${esc(url)}" onclick="this.select()" /><button type="button" class="card-btn small" data-copy-feed="${esc(url)}">${ic('copy')} Copy</button></div>`;
+    m.$('#feedOut').innerHTML = `
+      <div class="feed-count"><strong>${r.count}</strong> item${r.count === 1 ? '' : 's'} in the feed${r.skipped.length ? ` · ${r.skipped.length} left out` : ''}</div>
+      ${r.skipped.length ? `<details class="feed-skipped"><summary>Left out (${r.skipped.length})</summary><ul>${r.skipped.map(x => `<li><strong>${esc(x.name || x.id)}</strong> — ${esc(x.reason)}</li>`).join('')}</ul></details>` : ''}
+      ${copyRow('Feed spreadsheet (public, product info only)', r.sheetUrl)}
+      ${r.feedUrl ? copyRow('Feed link (same data)', r.feedUrl) : ''}
+      <div class="settings-h">Google — free listings</div>
+      <ol class="help-steps">
+        <li>Go to <strong>merchants.google.com</strong> and create a free Merchant Center account with your business details (1016 S Tremont St, (760) 754-8200).</li>
+        <li>Add your website. Google asks you to verify it — send me the verification code and I'll add it (easiest once your own domain is connected).</li>
+        <li><strong>Products → Add products → Google Sheets</strong> → use an existing sheet → paste the feed spreadsheet link above. Choose a daily update.</li>
+        <li>In shipping settings, set up local pickup / delivery, then turn on <strong>free listings</strong>.</li>
+      </ol>
+      <div class="settings-h">Facebook &amp; Instagram — catalog</div>
+      <ol class="help-steps">
+        <li>Go to <strong>business.facebook.com → Commerce Manager</strong> and create a catalog (type: <em>Ecommerce</em>) for the Oceanside Appliance Page.</li>
+        <li><strong>Data sources → Data feed → Scheduled feed</strong> → Google Sheets (or URL) → paste the feed spreadsheet link above → update daily.</li>
+        <li>Connect the catalog to your Facebook Page and Instagram so the items show in your shop and can be tagged in posts.</li>
+      </ol>
+      <p class="hint">Left out on purpose: drafts, sold items, “For parts” items, and anything without a price or a website image. Open-box items are listed as “used” on Google, which is Google's rule for opened boxes.</p>`;
+    m.$('#feedOut').addEventListener('click', e => { const b = e.target.closest('[data-copy-feed]'); if (b) copyText(b.dataset.copyFeed, 'Link copied'); });
+  } catch (err) {
+    m.$('#feedOut').innerHTML = `<div class="ai-err">${/Unknown request/i.test(err.message || '') ? 'Deploy the latest Apps Script (new version) first, then open this again.' : err.code === 'unauthorized' ? 'Staff key missing — open Settings.' : '⚠️ ' + esc(err.message)}</div>`;
+  }
+}
+
 // Photos as File objects for sharing/saving, in listing order. Tries the browser first, then the backend.
 async function listingPhotoFiles(urls, p) {
   const base = String(p.model || p.name || 'appliance').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'photo';
@@ -962,7 +1227,7 @@ function openListing(id) {
       const files = await listingPhotoFiles(photos, p);
       if (!files.length) throw new Error('none');
       photoFilesReady = files;
-      setSave(`Save all ${files.length} photo${files.length > 1 ? 's' : ''}`, true);
+      setSave(saveLabel(files.length), true);
       if (files.length < photos.length) m.$('#lsSaveHint').textContent = `${photos.length - files.length} photo${photos.length - files.length > 1 ? 's' : ''} couldn’t be prepared — save ${photos.length - files.length > 1 ? 'those' : 'that one'} from the item instead.`;
     } catch (err) {
       photoFilesReady = null;
