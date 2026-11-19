@@ -688,3 +688,26 @@
   .page-actions > .card-btn.primary { flex: 1; justify-content: center; padding: .65rem; }
   .todo-n { font-size: 1.6rem; min-width: 1.8rem; }
 }
+
+/* ── Settings window + sign-in "remember me" ── */
+.settings-modal { max-width: 480px; }
+.settings-h { font-size: .7rem; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); margin: 1.6rem 0 .5rem; }
+.settings-h:first-child { margin-top: 0; }
+.settings-p { font-size: .86rem; color: var(--ink-2); margin-bottom: 1rem; line-height: 1.55; }
+.settings-modal .form-group input { width: 100%; }
+.login-remember { display: flex; align-items: center; gap: .5rem; margin-top: .9rem; font-size: .84rem; color: var(--ink-2); cursor: pointer; text-align: left; }
+.login-remember input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+/* Opened from the home screen: room for the iPhone status bar */
+@media (display-mode: standalone) {
+  .admin-topbar { padding-top: max(1.1rem, env(safe-area-inset-top)); }
+  .login-screen { padding-top: env(safe-area-inset-top); }
+}
+@media (display-mode: standalone) and (max-width: 600px) {
+  .admin-topbar { padding-top: max(.75rem, env(safe-area-inset-top)); }
+}
+
+/* Listing window: save all photos */
+.ls-save { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin: .2rem 0 .8rem; }
+.ls-save .hint { flex: 1 1 220px; font-size: .78rem; line-height: 1.45; }
+@media (max-width: 600px) { .ls-save .card-btn { flex: 1 1 100%; justify-content: center; padding: .7rem; } }

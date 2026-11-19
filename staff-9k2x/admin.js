@@ -92,7 +92,7 @@ function handleApiError(e, what) {
   console.error(what, e);
   if (e.code === 'unauthorized') {
     setSheetsState('nokey');
-    showAdminToast('🔑 Staff key missing or wrong — click “Google Sheets” in the sidebar');
+    showAdminToast('🔑 Staff key missing or wrong — open Settings (top right) to add it');
   } else {
     setSheetsState('error');
     showAdminToast(`⚠️ ${what} failed — not saved to Google Sheets. Check your connection.`);

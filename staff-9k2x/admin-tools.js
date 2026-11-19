@@ -839,10 +839,42 @@ function openMovePhotos({ photos, start, fromId, onMove }) {
   renderPhotos(); renderList();
 }
 
+// Photos as File objects for sharing/saving, in listing order. Tries the browser first, then the backend.
+async function listingPhotoFiles(urls, p) {
+  const base = String(p.model || p.name || 'appliance').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'photo';
+  const ext = t => (t.split('/')[1] || 'jpg').replace('jpeg', 'jpg').replace(/\+.*$/, '');
+  const make = (blob, i) => new File([blob], `${base}-${i + 1}.${ext(blob.type)}`, { type: blob.type });
+  const out = await Promise.all(urls.map(async (u, i) => {
+    try {
+      const r = await fetch(u, { mode: 'cors', credentials: 'omit' });
+      if (!r.ok) return null;
+      const b = await r.blob();
+      return /^image\//.test(b.type) ? make(b, i) : null;
+    } catch { return null; }
+  }));
+  const missing = urls.map((u, i) => (out[i] ? null : i)).filter(i => i !== null);
+  if (missing.length) {
+    const { files } = await apiPost('admin_photo_files', { urls: missing.map(i => urls[i]) });
+    (files || []).forEach(f => {
+      const i = missing[f.index];
+      const bin = atob(f.data), bytes = new Uint8Array(bin.length);
+      for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+      out[i] = make(new Blob([bytes], { type: f.type }), i);
+    });
+  }
+  return out.filter(Boolean);
+}
+
 // ─── Marketplace listing (OfferUp / Facebook / Craigslist) ───
 function listingText(p, { business, asIs }) {
   const compare = Math.max(Number(p.msrp) || 0, Number(p.refPrice) || 0);
-  const specs = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {});
+  // Same clean specs as the website: no repeats, no box labels/dates, no "(per prefix)" notes
+  const junk = /^(model|model ?(no|number|#)\.?|condition|packaging|package|box.*|carton.*|.*\bdate\b.*|serial.*|manufactur.*|mfg.*|.*\blabel\b.*|sticker.*|sku|upc|barcode)$/i;
+  const specs = Object.entries(p.specs && typeof p.specs === 'object' ? p.specs : {})
+    .map(([k, v]) => [String(k).trim(), String(v ?? '').trim().replace(/\s*\((?:per|based on|from|according to|inferred|likely|probably|see)\b[^)]*\)\s*$/i, '')])
+    .filter(([k, v]) => k && v && !junk.test(k));
+  const cond = String(p.condition || '').toLowerCase();
+  const simpleCond = !cond ? '' : cond.startsWith('new') ? 'New' : cond.includes('part') ? 'For parts' : 'Used';
   const name = String(p.name || '');
   const brand = String(p.brand || '');
   const withBrand = brand && !name.toLowerCase().startsWith(brand.toLowerCase()) ? `${brand} ${name}` : name;
@@ -850,7 +882,7 @@ function listingText(p, { business, asIs }) {
   const lines = [
     `${p.name}`,
     [p.brand, p.model ? `Model ${p.model}` : ''].filter(Boolean).join(' · '),
-    p.condition ? `Condition: ${p.condition}` : '',
+    simpleCond ? `Condition: ${simpleCond}` : '',
     compare > p.price ? `Price: $${Number(p.price).toLocaleString()} (retail $${compare.toLocaleString()})` : `Price: $${Number(p.price).toLocaleString()}`,
     '',
     p.desc || '',
@@ -887,9 +919,11 @@ function openListing(id) {
       <input id="lsTitle" class="ls-field" />
       <div class="af-label">Description <button type="button" class="link-btn" data-copy="body">${ic('copy')} Copy</button></div>
       <textarea id="lsBody" class="ls-field" rows="12"></textarea>
-      <div class="af-label">Photos ${photos.length ? '<span class="hint">tap a photo to open it, then save it to your phone</span>' : ''}</div>
+      <div class="af-label">Photos ${photos.length ? `<span class="hint">${photos.length} photo${photos.length > 1 ? 's' : ''} · real photos of the unit first</span>` : ''}</div>
+      ${photos.length ? `<div class="ls-save"><button type="button" class="card-btn primary" id="lsSavePhotos" disabled>${ic('download')} <span>Getting photos ready…</span></button>
+        <span class="hint" id="lsSaveHint">On a phone this opens the share sheet — choose <strong>Save ${photos.length > 1 ? `${photos.length} Images` : 'Image'}</strong>, or send them straight to the Facebook or OfferUp app.</span></div>` : ''}
       ${photos.length
-        ? `<div class="photo-grid">${photos.map(u => `<a class="photo-tile" href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="" /></a>`).join('')}</div>`
+        ? `<div class="photo-grid" id="lsPhotos">${photos.map((u, i) => `<div class="photo-tile"><button type="button" class="zoom" data-zoom="${i}" aria-label="View photo ${i + 1} larger"><img src="${esc(u)}" alt="" /></button></div>`).join('')}</div>`
         : `<div class="photo-empty">No photos yet. <button type="button" class="link-btn" id="lsAddPhotos">${ic('camera')} Add photos</button></div>`}
       <div class="tip">${ic('help')}<span>When it sells on a marketplace, click <strong>Record sale</strong> so it comes off the website right away.</span></div>`,
     footer: `
@@ -915,6 +949,50 @@ function openListing(id) {
   m.$('#lsCopyAll').addEventListener('click', () => copyText(`${m.$('#lsTitle').value}\n\n${m.$('#lsBody').value}`, 'Listing copied'));
   m.$('#lsCopyLink').addEventListener('click', () => copyText(productUrl(p.id), 'Link copied'));
   m.$('#lsAddPhotos')?.addEventListener('click', () => { m.close(); openProductEditor(p.id); });
+  m.$('#lsPhotos')?.addEventListener('click', e => { const z = e.target.closest('[data-zoom]'); if (z) openLightbox(photos, +z.dataset.zoom); });
+
+  // "Save all photos": get the photos as files as soon as the window opens, so one tap shares them
+  // (iPhone only allows the share sheet straight after a tap, not after a download)
+  const saveBtn = m.$('#lsSavePhotos');
+  let photoFilesReady = null;
+  const setSave = (text, ready) => { if (!saveBtn) return; saveBtn.querySelector('span').textContent = text; saveBtn.disabled = !ready; };
+  async function loadPhotoFiles() {
+    setSave('Getting photos ready…', false);
+    try {
+      const files = await listingPhotoFiles(photos, p);
+      if (!files.length) throw new Error('none');
+      photoFilesReady = files;
+      setSave(`Save all ${files.length} photo${files.length > 1 ? 's' : ''}`, true);
+      if (files.length < photos.length) m.$('#lsSaveHint').textContent = `${photos.length - files.length} photo${photos.length - files.length > 1 ? 's' : ''} couldn’t be prepared — save ${photos.length - files.length > 1 ? 'those' : 'that one'} from the item instead.`;
+    } catch (err) {
+      photoFilesReady = null;
+      setSave('Try again', true);
+      m.$('#lsSaveHint').textContent = err.code === 'unauthorized' ? 'Staff key missing — open Settings.'
+        : /Unknown request/i.test(err.message || '') ? 'Deploy the latest Apps Script (new version) to turn this on.'
+        : 'Couldn’t get the photos — check your connection and try again.';
+    }
+  }
+  if (saveBtn) {
+    loadPhotoFiles();
+    saveBtn.addEventListener('click', async () => {
+      if (!photoFilesReady) return loadPhotoFiles();
+      const files = photoFilesReady;
+      if (navigator.canShare && navigator.canShare({ files })) {
+        try { await navigator.share({ files, title: p.name }); showAdminToast('✅ Photos shared'); }
+        catch (err) { if (err.name !== 'AbortError') showAdminToast('⚠️ Couldn’t open the share sheet — ' + err.message); }
+        return;
+      }
+      // Computer: download them one after another
+      for (const f of files) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(f); a.download = f.name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        await new Promise(r => setTimeout(r, 350));
+      }
+      showAdminToast(`⬇️ Downloaded ${files.length} photo${files.length > 1 ? 's' : ''}`);
+    });
+  }
   m.$('#lsAI').addEventListener('click', async () => {
     const btn = m.$('#lsAI');
     btn.disabled = true; btn.querySelector('span').textContent = 'Writing…';
